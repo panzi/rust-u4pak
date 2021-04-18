@@ -91,15 +91,17 @@ pub fn read_path(file: &mut impl Read, encoding: Encoding) -> Result<String> {
 
 pub trait Unpack: Sized {
     const SIZE: usize;
-    fn unpack(buffer: &[u8]) -> Result<Self>;
+    fn unpack(reader: &mut impl Read) -> Result<Self>;
 }
 
 impl Unpack for u32 {
     const SIZE: usize = 4;
 
     #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
-        Ok(Self::from_le_bytes(buffer.try_into()?))
+    fn unpack(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 4];
+        reader.read_exact(&mut buffer)?;
+        Ok(Self::from_le_bytes(buffer))
     }
 }
 
@@ -107,7 +109,9 @@ impl Unpack for u8 {
     const SIZE: usize = 1;
 
     #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
+    fn unpack(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 1];
+        reader.read_exact(&mut buffer)?;
         Ok(buffer[0])
     }
 }
@@ -116,8 +120,10 @@ impl Unpack for u64 {
     const SIZE: usize = 8;
 
     #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
-        Ok(Self::from_le_bytes(buffer.try_into()?))
+    fn unpack(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 8];
+        reader.read_exact(&mut buffer)?;
+        Ok(Self::from_le_bytes(buffer))
     }
 }
 /*
@@ -135,15 +141,11 @@ impl<T: Unpack, const N: usize> Unpack for [T; N] where T: Default, T: Copy {
     const SIZE: usize = N * T::SIZE;
 
     #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
-        if buffer.len() != T::SIZE * N {
-            return Err(Error::new(format!("expected {} bytes, but got {}", T::SIZE * N, buffer.len())));
-        }
+    fn unpack(reader: &mut impl Read) -> Result<Self> {
         let mut items: [T; N] = [T::default(); N];
-        for (index, buffer) in buffer.windows(T::SIZE).enumerate() {
-            items[index] = T::unpack(buffer)?;
+        for index in 0..N {
+            items[index] = T::unpack(reader)?;
         }
-
         Ok(items)
     }
 }
@@ -152,76 +154,48 @@ impl Unpack for CompressionBlock {
     const SIZE: usize = 16;
 
     #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
+    fn unpack(reader: &mut impl Read) -> Result<Self> {
+        let start_offset = u64::unpack(reader)?;
+        let end_offset   = u64::unpack(reader)?;
+
         Ok(Self {
-            start_offset: u64::from_le_bytes(buffer[0..8].try_into()?),
-            end_offset:   u64::from_le_bytes(buffer[8..16].try_into()?),
+            start_offset,
+            end_offset,
         })
     }
 }
 
-macro_rules! unpack_from {
-    ($file:expr, $($fields:tt)*) => {
-        let mut buf = [0u8; unpack!(@size $($fields)*)];
-        $file.read_exact(&mut buf)?;
-        unpack!(@unpack buf (0) $($fields)*);
-    };
-}
-
 macro_rules! unpack {
-    ($buf:expr, $($fields:tt)*) => {
-        let buf = $buf;
-        unpack!(@unpack buf (0) $($fields)*);
+    ($reader:expr, $($fields:tt)*) => {
+        unpack!(@unpack ($reader) $($fields)*);
     };
 
-    (@unpack $buf:ident ($pos:expr) $(,)?) => {};
+    (@unpack ($reader:expr) $(,)?) => {};
 
-    (@unpack $buf:ident ($pos:expr) $name:ident : $type:ty $([$count:expr])? $(,)?) => {
-        unpack!(@read $buf ($pos) $name $type $([$count])?);
+    (@unpack ($reader:expr) $name:ident : $type:ty $([$count:expr])? $(,)?) => {
+        unpack!(@read ($reader) $name $type $([$count])?);
     };
 
-    (@unpack $buf:ident ($pos:expr) $name:ident : $type:ty $([$count:expr])?, $($fields:tt)*) => {
-        unpack!(@read $buf ($pos) $name $type $([$count])?);
-        unpack!(@unpack $buf ($pos + <$type>::SIZE) $($fields)*);
+    (@unpack ($reader:expr) $name:ident : $type:ty $([$count:expr])?, $($fields:tt)*) => {
+        unpack!(@read ($reader) $name $type $([$count])?);
+        unpack!(@unpack ($reader) $($fields)*);
     };
 
-    (@read $buf:ident ($pos:expr) $name:ident $type:ty) => {
-        let $name: $type = <$type>::unpack(&$buf[($pos)..($pos + <$type>::SIZE)])?;
+    (@read ($reader:expr) $name:ident $type:ty) => {
+        let $name: $type = <$type>::unpack($reader)?;
     };
 
-    (@read $buf:ident ($pos:expr) $name:ident $type:ty [$count:expr]) => {
-        if <$type>::SIZE * $count != $buf.len() {
-            return Err(Error::new(format!("expected {} bytes, but got {}", <$type>::SIZE * $count, $buf.len())));
-        }
+    (@read ($reader:expr) $name:ident $type:ty [$count:expr]) => {
         let mut $name = Vec::with_capacity($count);
-        for buffer in $buf[$pos..$pos + <$type>::SIZE * $count].windows(<$type>::SIZE) {
-            let item: $type = <$type>::unpack(buffer)?;
-            $name.push(item);
+        for _ in 0..($count) {
+            $name.push(<$type>::unpack($reader)?);
         }
         let $name = $name;
     };
-
-    (@size $(,)?) => { 0 };
-    
-    (@size $name:ident : $type:ty $(,)?) => {
-        <$type>::SIZE
-    };
-
-    (@size $name:ident : $type:ty [$count:expr] $(,)?) => {
-        <$type>::SIZE * $count
-    };
-
-    (@size $name:ident : $type:ty, $($fields:tt)*) => {
-        <$type>::SIZE + unpack!(@size $($fields)*)
-    };
-
-    (@size $name:ident : $type:ty [$count:expr], $($fields:tt)*) => {
-        <$type>::SIZE * $count + unpack!(@size $($fields)*)
-    };
 }
 
-pub fn read_record_v1(file: &mut impl Read, filename: String) -> Result<Record> {
-    unpack_from!(file,
+pub fn read_record_v1(reader: &mut impl Read, filename: String) -> Result<Record> {
+    unpack!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -233,8 +207,8 @@ pub fn read_record_v1(file: &mut impl Read, filename: String) -> Result<Record> 
     Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, sha1))
 }
 
-pub fn read_record_v2(file: &mut impl Read, filename: String) -> Result<Record> {
-    unpack_from!(file,
+pub fn read_record_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
+    unpack!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -245,8 +219,8 @@ pub fn read_record_v2(file: &mut impl Read, filename: String) -> Result<Record> 
     Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, sha1))
 }
 
-pub fn read_record_v3(file: &mut impl Read, filename: String) -> Result<Record> {
-    unpack_from!(file,
+pub fn read_record_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
+    unpack!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -255,17 +229,16 @@ pub fn read_record_v3(file: &mut impl Read, filename: String) -> Result<Record> 
     );
 
     let compression_blocks = if compression_method != COMPR_NONE {
-        unpack_from!(file, block_count: u32);
-        let mut buffer = vec![0u8; CompressionBlock::SIZE * block_count as usize];
-        file.read_exact(&mut buffer)?;
-        unpack!(buffer, blocks: CompressionBlock [block_count as usize]);
-
+        unpack!(reader,
+            block_count: u32,
+            blocks: CompressionBlock [block_count as usize]
+        );
         Some(blocks)
     } else {
         None
     };
 
-    unpack_from!(file,
+    unpack!(reader,
         encrypted: u8,
         compression_block_size: u32,
     );
@@ -273,8 +246,8 @@ pub fn read_record_v3(file: &mut impl Read, filename: String) -> Result<Record> 
     Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
 }
 
-pub fn read_record_v4(file: &mut impl Read, filename: String) -> Result<Record> {
-    unpack_from!(file,
+pub fn read_record_v4(reader: &mut impl Read, filename: String) -> Result<Record> {
+    unpack!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -283,17 +256,16 @@ pub fn read_record_v4(file: &mut impl Read, filename: String) -> Result<Record> 
     );
 
     let compression_blocks = if compression_method != COMPR_NONE {
-        unpack_from!(file, block_count: u32);
-        let mut buffer = vec![0u8; CompressionBlock::SIZE * block_count as usize];
-        file.read_exact(&mut buffer)?;
-        unpack!(buffer, blocks: CompressionBlock [block_count as usize]);
-
+        unpack!(reader,
+            block_count: u32,
+            blocks: CompressionBlock [block_count as usize]
+        );
         Some(blocks)
     } else {
         None
     };
 
-    unpack_from!(file,
+    unpack!(reader,
         encrypted: u8,
         compression_block_size: u32,
         _unknown: u32,
@@ -320,19 +292,20 @@ impl Pak {
     fn from_file(file: &mut File, options: Options) -> Result<Pak> {
         let mut reader = BufReader::new(file);
         let footer_offset = reader.seek(SeekFrom::End(-44))?;
-        let mut footer = [0u8; 44];
 
-        reader.read_exact(&mut footer)?;
+        unpack!(&mut reader,
+            magic: u32,
+            version: u32,
+            index_offset: u64,
+            index_size: u64,
+            index_sha1: Sha1,
+        );
 
-        let magic   = u32::from_le_bytes((&footer[0..4]).try_into()?);
         let version = if let Some(version) = options.force_version {
             version
         } else {
-            u32::from_le_bytes((&footer[4..8]).try_into()?)
+            version
         };
-        let index_offset = u64::from_le_bytes((&footer[8..16]).try_into()?);
-        let index_size   = u64::from_le_bytes((&footer[16..24]).try_into()?);
-        let index_sha1: Sha1 = (&footer[24..44]).try_into()?;
 
         if !options.ignore_magic && magic != 0x5A6F12E1 {
             return Err(Error::new(format!("illegal file magic: 0x{:X}", magic)));
