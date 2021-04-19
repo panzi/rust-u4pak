@@ -143,4 +143,10 @@ impl From<std::array::TryFromSliceError> for Error {
     }
 }
 
+impl From<std::num::ParseIntError> for Error {
+    fn from(error: std::num::ParseIntError) -> Self {
+        Error::new(error.to_string())
+    }
+}
+
 pub type Result<T> = core::result::Result<T, Error>;

@@ -14,9 +14,10 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use clap::{Arg, App, SubCommand};
+use std::convert::TryInto;
 
 pub mod pak;
-pub use pak::Pak;
+pub use pak::{Pak, Options};
 
 pub mod result;
 pub use result::{Error, Result};
@@ -26,6 +27,11 @@ pub use sort::{DEFAULT_ORDER, SortKey, parse_order};
 
 pub mod record;
 pub use record::Record;
+
+pub mod list;
+pub use list::{list, ListOptions, ListStyle};
+
+pub mod util;
 
 pub enum Filter<'a> {
     None,
@@ -85,6 +91,46 @@ fn arg_verbose<'a, 'b>() -> Arg<'a, 'b> {
         .help("Print verbose output.")
 }
 
+fn arg_check_integrity<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("check-integrity")
+        .long("check-integrity")
+        .short("c")
+        .takes_value(false)
+        .help("Check integrity of package")
+}
+
+fn arg_ignore_magic<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("ignore-magic")
+        .long("ignore-magic")
+        .takes_value(false)
+        .help("Ignore file magic")
+}
+
+fn arg_encoding<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("encoding")
+        .long("encoding")
+        .short("e")
+        .takes_value(true)
+        .default_value("UTF-8")
+        .value_name("ENCODING")
+        .help("Use ENCODING to decode strings. Supported encodings: UTF-8, Latin1, ASCII")
+}
+
+fn arg_force_version<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("force-version")
+        .long("force-version")
+        .takes_value(true)
+        .value_name("VERSION")
+        .help("Assume package to be of given version.")
+}
+
+fn arg_ignore_null_checksumsc<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("ignore-null-checksums")
+        .long("ignore-null-checksums")
+        .takes_value(false)
+        .help("Ignore checksums that are all zeros.")
+}
+
 fn run() -> Result<()> {
     let app = App::new("VPK - Valve Packages")
         .version("1.0.0")
@@ -101,6 +147,24 @@ fn run() -> Result<()> {
                 .help(
                     "Only print file names. \
                      This is useful for use with xargs and the like."))
+            .arg(Arg::with_name("sort")
+                .long("sort")
+                .short("s")
+                .takes_value(true)
+                .value_name("ORDER")
+                .help(
+                    "Sort order of list as comma separated keys:\n\
+                    \n\
+                    * path               - path of the file inside the package\n\
+                    * size               - size of the data embedded in the package\n\
+                    * uncompressed-size  - sum of the other two sizes\n\
+                    * offset             - offset inside of the package\n\
+                    * compression-method - the compression method\n\
+                    \n\
+                    If you prepend the order with - you invert the sort order for that key. E.g.:\n\
+                    \n\
+                    u4pak list --sort=-size,name")
+            )
             .arg(Arg::with_name("null")
                 .long("null")
                 .short("z")
@@ -111,6 +175,11 @@ fn run() -> Result<()> {
                      This is useful for use with xargs --null, to be sure that \
                      possible new lines in file names aren't interpreted as \
                      file name separators."))
+            .arg(arg_check_integrity())
+            .arg(arg_ignore_magic())
+            .arg(arg_encoding())
+            .arg(arg_force_version())
+            .arg(arg_ignore_null_checksumsc())
             .arg(arg_human_readable())
             .arg(arg_package())
             .arg(arg_paths()));
@@ -124,19 +193,37 @@ fn run() -> Result<()> {
             } else {
                 None
             };
-            let order = match &order {
-                Some(order) => &order[..],
-                None => &DEFAULT_ORDER[..],
+            let order = if let Some(order) = &order {
+                Some(&order[..])
+            } else {
+                None
             };
 
-            let human_readable = args.is_present("human-readable");
-            let null_separated = args.is_present("null");
-            let only_names     = args.is_present("only-names");
-            let path           = args.value_of("package").unwrap();
-/*
-            let pak = Pak::from_path(path)?;
+            let human_readable        = args.is_present("human-readable");
+            let null_separated        = args.is_present("null");
+            let only_names            = args.is_present("only-names");
+            let check_integrity       = args.is_present("check-integrity");
+            let ignore_magic          = args.is_present("ignore-magic");
+            let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let path = args.value_of("package").unwrap();
+            let filter = Filter::new(args);
 
-            list(&pak, ListOptions {
+            let force_version = if let Some(version) = args.value_of("force-version") {
+                Some(version.parse()?)
+            } else {
+                None
+            };
+
+            let pak = Pak::from_path(path, Options {
+                check_integrity,
+                ignore_magic,
+                encoding,
+                force_version,
+                ignore_null_checksums,
+            })?;
+
+            list(pak, ListOptions {
                 order,
                 style: if only_names {
                     ListStyle::OnlyNames { null_separated }
@@ -145,7 +232,6 @@ fn run() -> Result<()> {
                 },
                 filter: filter.as_ref(),
             })?;
-            */
         }
         (cmd, _) => {
             return Err(Error::new(format!(

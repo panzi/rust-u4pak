@@ -114,7 +114,7 @@ impl Record {
     }
 
     #[inline]
-    pub fn sha1(&self) -> &[u8] {
+    pub fn sha1(&self) -> &Sha1 {
         &self.sha1
     }
 

@@ -1,5 +1,4 @@
-use std::{convert::TryInto, usize};
-use std::path::{Path};
+use std::{convert::TryFrom, path::Path};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
 
@@ -15,6 +14,24 @@ pub const COMPR_BIAS_SPEED : u32 = 0x20;
 
 pub type Sha1 = [u8; 20];
 
+pub const NULL_SHA1: Sha1 = [0u8; 20];
+
+pub fn compression_method_name(compression_method: u32) -> &'static str {
+    match compression_method {
+        COMPR_NONE => "none",
+        COMPR_ZLIB => "zlib",
+        COMPR_BIAS_MEMORY => "bias memory",
+        COMPR_BIAS_SPEED  => "bias speed",
+        _ => "unknown",
+    }
+}
+
+pub fn format_sha1(sha1: &Sha1) -> String {
+    format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        sha1[ 0], sha1[ 1], sha1[ 2], sha1[ 3], sha1[ 4], sha1[ 5], sha1[ 6], sha1[ 7], sha1[ 8], sha1[ 9],
+        sha1[10], sha1[11], sha1[12], sha1[13], sha1[14], sha1[15], sha1[16], sha1[17], sha1[18], sha1[19])
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Encoding {
     ASCII,
@@ -29,18 +46,36 @@ impl Default for Encoding {
 }
 
 impl Encoding {
-    pub fn parse(self, buffer: Vec<u8>) -> Result<String> {
+    pub fn parse_vec(self, buffer: Vec<u8>) -> Result<String> {
         match self {
             Encoding::UTF8 => Ok(String::from_utf8(buffer)?),
             Encoding::ASCII => {
                 for byte in &buffer {
                     if *byte > 0x7F {
-                        return Err(Error::new(format!("ASCII conversion error: byte outside of ASCII range: {}", *byte)));
+                        return Err(Error::new(format!(
+                            "ASCII conversion error: byte outside of ASCII range: {}",
+                            *byte)));
                     }
                 }
                 Ok(buffer.into_iter().map(|byte| byte as char).collect())
             }
             Encoding::Latin1 => Ok(buffer.into_iter().map(|byte| byte as char).collect())
+        }
+    }
+}
+
+impl TryFrom<&str> for Encoding {
+    type Error = crate::result::Error;
+
+    fn try_from(encoding: &str) -> std::result::Result<Self, Error> {
+        if encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8") {
+            Ok(Encoding::UTF8)
+        } else if encoding.eq_ignore_ascii_case("ascii") {
+            Ok(Encoding::ASCII)
+        } else if encoding.eq_ignore_ascii_case("latin1") || encoding.eq_ignore_ascii_case("iso-8859-1") {
+            Ok(Encoding::Latin1)
+        } else {
+            Err(Error::new(format!("unsupported encoding: {:?}", encoding)))
         }
     }
 }
@@ -80,13 +115,13 @@ pub fn read_path(file: &mut impl Read, encoding: Encoding) -> Result<String> {
     file.read_exact(&mut buf)?;
     let size = u32::from_le_bytes(buf);
 
-    let mut buf = Vec::with_capacity(size as usize);
+    let mut buf = vec![0u8; size as usize];
     file.read_exact(&mut buf)?;
     if let Some(index) = buf.iter().position(|byte| *byte == 0) {
         buf.truncate(index);
     }
 
-    encoding.parse(buf)
+    encoding.parse_vec(buf)
 }
 
 pub trait Unpack: Sized {
@@ -176,11 +211,11 @@ macro_rules! unpack {
         unpack!(@decl_if () $($rest)*);
     };
 
-    (@decl $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         let $name;
     };
 
-    (@decl $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         let $name;
         unpack!(@decl $($rest)*);
     };
@@ -200,11 +235,11 @@ macro_rules! unpack {
         unpack!(@none_if () $($rest)*);
     };
 
-    (@none $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         $name = None;
     };
 
-    (@none $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         $name = None;
         unpack!(@none $($rest)*);
     };
@@ -218,20 +253,33 @@ macro_rules! unpack {
         unpack!(@none_if ($($cond)* $tok) $($rest)*);
     };
 
-    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
-        unpack!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
+    (@unpack ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+        unpack!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
     };
 
-    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
-        unpack!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
+    (@unpack ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+        unpack!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
         unpack!(@unpack ($($wrap)*) ($reader) $($rest)*);
     };
 
-    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty) => {
+    // FIXME: This never matches! Why?
+    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident String) => {
+        $name = {
+            let _encoding = unpack!(@attr_encoding $($attrs)*);
+            let _size = <unpack!(@attr_size $($attrs)*)>::unpack($reader)? as usize;
+            let _buffer = vec![0u8; _size];
+            if let Some(_index) = _buffer.iter().position(|_byte| *_byte == 0) {
+                _buffer.truncate(_index);
+            }
+            $($wrap)*(_encoding.parse_vec(_buffer))
+        };
+    };
+
+    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty) => {
         $name = $($wrap)*(<$type>::unpack($reader)?);
     };
 
-    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:ty]) => {
+    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:ty]) => {
         $name = {
             let _count = <$count>::unpack($reader)? as usize;
             let mut _items = Vec::with_capacity(_count);
@@ -242,7 +290,7 @@ macro_rules! unpack {
         };
     };
 
-    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:expr]) => {
+    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:expr]) => {
         $name = {
             let _count = $count;
             let mut _items = Vec::with_capacity(_count);
@@ -251,6 +299,38 @@ macro_rules! unpack {
             }
             $($wrap)*(_items)
         };
+    };
+
+    (@attr_size size = $value:expr $(,)?) => {
+        $value
+    };
+
+    (@attr_size size = $value:expr, $($attrs:tt)*) => {
+        $value
+    };
+
+    (@attr_size $attr:ident = $value:expr, $($attrs:tt)*) => {
+        unpack!(@attr_size $($attrs)*);
+    };
+
+    (@attr_size $(,)?) => {
+        u32
+    };
+
+    (@attr_encoding encoding = $value:expr $(,)?) => {
+        $value
+    };
+
+    (@attr_encoding encoding = $value:expr, $($attrs:tt)*) => {
+        $value
+    };
+
+    (@attr_encoding $attr:ident = $value:expr, $($attrs:tt)*) => {
+        unpack!(@attr_encoding $($attrs)*);
+    };
+
+    (@attr_encoding $(,)?) => {
+        Encoding::UTF8
     };
 }
 
@@ -371,9 +451,7 @@ impl Pak {
         reader.seek(SeekFrom::Start(index_offset))?;
         let mount_point = read_path(&mut reader, options.encoding)?;
 
-        let mut buf = [0u8; 4];
-        reader.read_exact(&mut buf)?;
-        let entry_count = u32::from_le_bytes(buf);
+        unpack!(&mut reader, entry_count: u32);
 
         let mut records = Vec::with_capacity(entry_count as usize);
 
