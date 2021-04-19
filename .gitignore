@@ -1,1 +1,6 @@
 /target
+/tmp
+*.zip
+.*
+!.keep
+!.gitignore
