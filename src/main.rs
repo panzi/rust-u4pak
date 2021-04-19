@@ -83,14 +83,6 @@ fn arg_paths<'a, 'b>() -> Arg<'a, 'b> {
         .help("If given, only consider these files from the package.")
 }
 
-fn arg_verbose<'a, 'b>() -> Arg<'a, 'b> {
-    Arg::with_name("verbose")
-        .long("verbose")
-        .short("v")
-        .takes_value(false)
-        .help("Print verbose output.")
-}
-
 fn arg_check_integrity<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("check-integrity")
         .long("check-integrity")
@@ -182,7 +174,12 @@ fn run() -> Result<()> {
             .arg(arg_ignore_null_checksumsc())
             .arg(arg_human_readable())
             .arg(arg_package())
-            .arg(arg_paths()));
+            .arg(arg_paths()))
+        // TODO
+        .subcommand(SubCommand::with_name("check"))
+        .subcommand(SubCommand::with_name("unpack"))
+        .subcommand(SubCommand::with_name("pack"))
+        .subcommand(SubCommand::with_name("mount"));
 
     let matches = app.get_matches();
 
