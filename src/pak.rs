@@ -90,13 +90,10 @@ pub fn read_path(file: &mut impl Read, encoding: Encoding) -> Result<String> {
 }
 
 pub trait Unpack: Sized {
-    const SIZE: usize;
     fn unpack(reader: &mut impl Read) -> Result<Self>;
 }
 
 impl Unpack for u32 {
-    const SIZE: usize = 4;
-
     #[inline]
     fn unpack(reader: &mut impl Read) -> Result<Self> {
         let mut buffer = [0u8; 4];
@@ -106,8 +103,6 @@ impl Unpack for u32 {
 }
 
 impl Unpack for u8 {
-    const SIZE: usize = 1;
-
     #[inline]
     fn unpack(reader: &mut impl Read) -> Result<Self> {
         let mut buffer = [0u8; 1];
@@ -117,8 +112,6 @@ impl Unpack for u8 {
 }
 
 impl Unpack for u64 {
-    const SIZE: usize = 8;
-
     #[inline]
     fn unpack(reader: &mut impl Read) -> Result<Self> {
         let mut buffer = [0u8; 8];
@@ -126,20 +119,9 @@ impl Unpack for u64 {
         Ok(Self::from_le_bytes(buffer))
     }
 }
-/*
-impl Unpack for Sha1 {
-    const SIZE: usize = 20;
 
-    #[inline]
-    fn unpack(buffer: &[u8]) -> Result<Self> {
-        Ok(buffer.try_into()?)
-    }
-}*/
-
-// TODO: this all might be inefficient
+// TODO: this all might be inefficient for T=u8
 impl<T: Unpack, const N: usize> Unpack for [T; N] where T: Default, T: Copy {
-    const SIZE: usize = N * T::SIZE;
-
     #[inline]
     fn unpack(reader: &mut impl Read) -> Result<Self> {
         let mut items: [T; N] = [T::default(); N];
@@ -151,8 +133,6 @@ impl<T: Unpack, const N: usize> Unpack for [T; N] where T: Default, T: Copy {
 }
 
 impl Unpack for CompressionBlock {
-    const SIZE: usize = 16;
-
     #[inline]
     fn unpack(reader: &mut impl Read) -> Result<Self> {
         let start_offset = u64::unpack(reader)?;
@@ -196,11 +176,11 @@ macro_rules! unpack {
         unpack!(@decl_if () $($rest)*);
     };
 
-    (@decl $name:ident : $type:ty $([$count:expr])? $(,)?) => {
+    (@decl $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         let $name;
     };
 
-    (@decl $name:ident : $type:ty $([$count:expr])?, $($rest:tt)*) => {
+    (@decl $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         let $name;
         unpack!(@decl $($rest)*);
     };
@@ -220,11 +200,11 @@ macro_rules! unpack {
         unpack!(@none_if () $($rest)*);
     };
 
-    (@none $name:ident : $type:ty $([$count:expr])? $(,)?) => {
+    (@none $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         $name = None;
     };
 
-    (@none $name:ident : $type:ty $([$count:expr])?, $($rest:tt)*) => {
+    (@none $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         $name = None;
         unpack!(@none $($rest)*);
     };
@@ -238,12 +218,12 @@ macro_rules! unpack {
         unpack!(@none_if ($($cond)* $tok) $($rest)*);
     };
 
-    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$count:expr])? $(,)?) => {
-        unpack!(@read ($($wrap)*) ($reader) $name $type $([$count])?);
+    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+        unpack!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
     };
 
-    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$count:expr])?, $($rest:tt)*) => {
-        unpack!(@read ($($wrap)*) ($reader) $name $type $([$count])?);
+    (@unpack ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+        unpack!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
         unpack!(@unpack ($($wrap)*) ($reader) $($rest)*);
     };
 
@@ -251,10 +231,22 @@ macro_rules! unpack {
         $name = $($wrap)*(<$type>::unpack($reader)?);
     };
 
+    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:ty]) => {
+        $name = {
+            let _count = <$count>::unpack($reader)? as usize;
+            let mut _items = Vec::with_capacity(_count);
+            for _ in 0..(_count) {
+                _items.push(<$type>::unpack($reader)?);
+            }
+            $($wrap)*(_items)
+        };
+    };
+
     (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:expr]) => {
         $name = {
-            let mut _items = Vec::with_capacity($count);
-            for _ in 0..($count) {
+            let _count = $count;
+            let mut _items = Vec::with_capacity(_count);
+            for _ in 0..(_count) {
                 _items.push(<$type>::unpack($reader)?);
             }
             $($wrap)*(_items)
@@ -295,8 +287,7 @@ pub fn read_record_v3(reader: &mut impl Read, filename: String) -> Result<Record
         compression_method: u32,
         sha1: Sha1,
         if compression_method != COMPR_NONE {
-            block_count: u32,
-            compression_blocks: CompressionBlock [block_count.unwrap() as usize],
+            compression_blocks: CompressionBlock [u32],
         }
         encrypted: u8,
         compression_block_size: u32,
@@ -313,8 +304,7 @@ pub fn read_record_v4(reader: &mut impl Read, filename: String) -> Result<Record
         compression_method: u32,
         sha1: Sha1,
         if compression_method != COMPR_NONE {
-            block_count: u32,
-            compression_blocks: CompressionBlock [block_count.unwrap() as usize],
+            compression_blocks: CompressionBlock [u32],
         }
         encrypted: u8,
         compression_block_size: u32,
