@@ -159,9 +159,9 @@ fn run() -> Result<()> {
                     \n\
                     u4pak list --sort=-size,name")
             )
-            .arg(Arg::with_name("null")
-                .long("null")
-                .short("z")
+            .arg(Arg::with_name("print0")
+                .long("print0")
+                .short("0")
                 .requires("only-names")
                 .takes_value(false)
                 .help(
@@ -199,7 +199,7 @@ fn run() -> Result<()> {
             };
 
             let human_readable        = args.is_present("human-readable");
-            let null_separated        = args.is_present("null");
+            let null_separated        = args.is_present("print0");
             let only_names            = args.is_present("only-names");
             let check_integrity       = args.is_present("check-integrity");
             let ignore_magic          = args.is_present("ignore-magic");

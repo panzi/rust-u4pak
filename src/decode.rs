@@ -34,13 +34,22 @@ impl Decode for u64 {
 }
 
 // TODO: this all might be inefficient for T=u8
-impl<T: Decode, const N: usize> Decode for [T; N] where T: Default, T: Copy {
+//default impl<T: Decode, const N: usize> Decode for [T; N] where T: Default, T: Copy {
+//    #[inline]
+//    fn decode(reader: &mut impl Read) -> Result<Self> {
+//        let mut items: [T; N] = [T::default(); N];
+//        for index in 0..N {
+//            items[index] = T::decode(reader)?;
+//        }
+//        Ok(items)
+//    }
+//}
+
+impl<const N: usize> Decode for [u8; N] {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
-        let mut items: [T; N] = [T::default(); N];
-        for index in 0..N {
-            items[index] = T::decode(reader)?;
-        }
+        let mut items = [0u8; N];
+        reader.read_exact(&mut items)?;
         Ok(items)
     }
 }

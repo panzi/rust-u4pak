@@ -76,7 +76,7 @@ pub fn print_row(row: &[impl AsRef<str>], lens: &[usize], align: &[Align]) {
 
 pub fn print_table(header: &[impl AsRef<str>], align: &[Align], body: &[Vec<impl AsRef<str>>]) {
     // TODO: maybe count graphemes? needs extra lib. haven't seen non-ASCII filenames anyway
-    let mut lens: Vec<usize> = align.iter().map(|_| 0).collect();
+    let mut lens: Vec<usize> = vec![0; align.len()];
 
     for (cell, max_len) in header.iter().zip(lens.iter_mut()) {
         let len = cell.as_ref().chars().count();
