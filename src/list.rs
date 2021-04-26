@@ -19,7 +19,7 @@ use crate::sort::{sort, Order};
 use crate::util::{format_size, print_table, Align::*};
 use crate::result::Result;
 use crate::record::Record;
-use crate::pak::{Pak, compression_method_name, format_sha1};
+use crate::pak::{Pak, compression_method_name, HexDisplay};
 
 #[derive(Debug, PartialEq)]
 pub enum ListStyle {
@@ -86,7 +86,7 @@ pub fn list_records(records: &[Record], options: ListOptions) -> Result<()> {
                     fmt_size(record.uncompressed_size()),
                     compression_method_name(record.compression_method()).to_owned(),
                     fmt_size(record.size()),
-                    format_sha1(record.sha1()),
+                    HexDisplay::new(record.sha1()).to_string(),
                     record.filename().to_owned(),
                 ]);
             }

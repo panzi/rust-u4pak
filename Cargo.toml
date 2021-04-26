@@ -7,3 +7,4 @@ license-file = "LICENSE.txt"
 
 [dependencies]
 clap = "2.33.3"
+rust-crypto = "^0.2"

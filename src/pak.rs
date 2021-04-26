@@ -1,11 +1,16 @@
-use std::{convert::TryFrom, path::Path};
+use std::{convert::TryFrom, fmt::Display, path::Path};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
+
+use crypto::digest::Digest;
+use crypto::sha1::{Sha1 as Sha1Hasher};
 
 use crate::decode;
 use crate::decode::Decode;
 use crate::{Record, Result, Error};
 use crate::record::CompressionBlock;
+
+pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
 
@@ -14,9 +19,24 @@ pub const COMPR_ZLIB       : u32 = 0x01;
 pub const COMPR_BIAS_MEMORY: u32 = 0x10;
 pub const COMPR_BIAS_SPEED : u32 = 0x20;
 
+pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
+
 pub type Sha1 = [u8; 20];
 
 pub const NULL_SHA1: Sha1 = [0u8; 20];
+
+macro_rules! check_error {
+    ($error_count:ident, $abort_on_error:expr, $($error:tt)*) => {
+        {
+            let error = $($error)*;
+            $error_count += 1;
+            if $abort_on_error {
+                return Err(error);
+            }
+            eprintln!("{}", error);
+        }
+    };
+}
 
 pub fn compression_method_name(compression_method: u32) -> &'static str {
     match compression_method {
@@ -28,10 +48,26 @@ pub fn compression_method_name(compression_method: u32) -> &'static str {
     }
 }
 
-pub fn format_sha1(sha1: &Sha1) -> String {
-    format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        sha1[ 0], sha1[ 1], sha1[ 2], sha1[ 3], sha1[ 4], sha1[ 5], sha1[ 6], sha1[ 7], sha1[ 8], sha1[ 9],
-        sha1[10], sha1[11], sha1[12], sha1[13], sha1[14], sha1[15], sha1[16], sha1[17], sha1[18], sha1[19])
+#[derive(Debug)]
+pub struct HexDisplay<'a> {
+    data: &'a [u8]
+}
+
+impl<'a> HexDisplay<'a> {
+    #[inline]
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+}
+
+impl<'a> Display for HexDisplay<'a> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.data {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -256,14 +292,9 @@ impl Pak {
         let pos = reader.seek(SeekFrom::Current(0))?;
         if pos > footer_offset {
             return Err(Error::new("index bleeds into footer".to_owned()));
-
         }
 
-        if options.check_integrity {
-            panic!("integrity check not implemented")
-        }
-
-        Ok(Self {
+        let pak = Self {
             version,
             index_offset,
             index_size,
@@ -271,37 +302,125 @@ impl Pak {
             index_sha1,
             mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
             records,
-        })
+        };
+
+        if options.check_integrity {
+            pak.check_integrity(&mut reader, true, options.ignore_null_checksums)?;
+        }
+
+        Ok(pak)
     }
 
+    pub fn check_integrity<R>(&self, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool) -> Result<usize>
+    where R: Read, R: Seek {
+        let mut hasher = Sha1Hasher::new();
+        let mut buffer = vec![0u8; BUFFER_SIZE];
+        let mut error_count = 0usize;
+        let mut actual_digest = [0u8; 20];
+
+        let mut check_data = |filename: &str, offset: u64, size: u64, checksum: &Sha1| -> Result<()> {
+            if ignore_null_checksums && checksum == &NULL_SHA1 {
+                return Ok(());
+            }
+            reader.seek(SeekFrom::Start(offset))?;
+            hasher.reset();
+            let mut remaining = size;
+            loop {
+                if remaining >= BUFFER_SIZE as u64 {
+                    reader.read_exact(&mut buffer)?;
+                    hasher.input(&buffer);
+                    remaining -= BUFFER_SIZE as u64;
+                } else {
+                    let buffer = &mut buffer[..remaining as usize];
+                    reader.read_exact(buffer)?;
+                    hasher.input(&buffer);
+                    break;
+                }
+            }
+            hasher.result(&mut actual_digest);
+            if &actual_digest != checksum {
+                return Err(Error::new(format!(
+                    "checksum missmatch:\n\
+                     expected: {}\n\
+                     actual:   {}",
+                     HexDisplay::new(checksum),
+                     HexDisplay::new(&actual_digest)
+                )).with_path(filename));
+            }
+            Ok(())
+        };
+
+        if let Err(error) = check_data("<archive index>", self.index_offset, self.index_size, &self.index_sha1) {
+            check_error!(error_count, abort_on_error, error);
+        }
+
+        for record in &self.records {
+            if !COMPR_METHODS.contains(&record.compression_method()) {
+                check_error!(error_count, abort_on_error, Error::new(format!(
+                    "unknown compression method: 0x{:02x}",
+                    record.compression_method(),
+                )).with_path(record.filename()));
+            }
+
+            if record.compression_method() == COMPR_NONE && record.size() != record.uncompressed_size() {
+                check_error!(error_count, abort_on_error, Error::new(format!(
+                    "file is not compressed but compressed size ({}) differes from uncompressed size ({})",
+                    record.size(),
+                    record.uncompressed_size(),
+                )).with_path(record.filename()));
+            }
+
+            let offset = self.data_offset(record);
+            if offset + record.size() > self.index_offset {
+                check_error!(error_count, abort_on_error, Error::new(
+                    "data bleeds into index".to_string()
+                ).with_path(record.filename()));
+            }
+
+            if let Err(error) = check_data(record.filename(), offset, record.size(), record.sha1()) {
+                check_error!(error_count, abort_on_error, error);
+            }
+        }
+
+        Ok(error_count)
+    }
+
+    #[inline]
     pub fn version(&self) -> u32 {
         self.version
     }
 
+    #[inline]
     pub fn index_offset(&self) -> u64 {
         self.index_offset
     }
 
+    #[inline]
     pub fn index_size(&self) -> u64 {
         self.index_size
     }
 
+    #[inline]
     pub fn footer_offset(&self) -> u64 {
         self.footer_offset
     }
 
+    #[inline]
     pub fn index_sha1(&self) -> &Sha1 {
         &self.index_sha1
     }
 
+    #[inline]
     pub fn mount_point(&self) -> &Option<String> {
         &self.mount_point
     }
 
+    #[inline]
     pub fn records(&self) -> &[Record] {
         &self.records
     }
 
+    #[inline]
     pub fn into_records(self) -> Vec<Record> {
         self.records
     }
@@ -328,5 +447,10 @@ impl Pak {
                 panic!("unsupported version: {}", self.version)
             }
         }
+    }
+
+    #[inline]
+    pub fn data_offset(&self, record: &Record) -> u64 {
+        self.header_size(record) + record.offset()
     }
 }
