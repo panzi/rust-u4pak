@@ -2,8 +2,10 @@ use std::{convert::TryFrom, path::Path};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
 
-use crate::record::CompressionBlock;
+use crate::decode;
+use crate::decode::Decode;
 use crate::{Record, Result, Error};
+use crate::record::CompressionBlock;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
 
@@ -124,218 +126,8 @@ pub fn read_path(file: &mut impl Read, encoding: Encoding) -> Result<String> {
     encoding.parse_vec(buf)
 }
 
-pub trait Unpack: Sized {
-    fn unpack(reader: &mut impl Read) -> Result<Self>;
-}
-
-impl Unpack for u32 {
-    #[inline]
-    fn unpack(reader: &mut impl Read) -> Result<Self> {
-        let mut buffer = [0u8; 4];
-        reader.read_exact(&mut buffer)?;
-        Ok(Self::from_le_bytes(buffer))
-    }
-}
-
-impl Unpack for u8 {
-    #[inline]
-    fn unpack(reader: &mut impl Read) -> Result<Self> {
-        let mut buffer = [0u8; 1];
-        reader.read_exact(&mut buffer)?;
-        Ok(buffer[0])
-    }
-}
-
-impl Unpack for u64 {
-    #[inline]
-    fn unpack(reader: &mut impl Read) -> Result<Self> {
-        let mut buffer = [0u8; 8];
-        reader.read_exact(&mut buffer)?;
-        Ok(Self::from_le_bytes(buffer))
-    }
-}
-
-// TODO: this all might be inefficient for T=u8
-impl<T: Unpack, const N: usize> Unpack for [T; N] where T: Default, T: Copy {
-    #[inline]
-    fn unpack(reader: &mut impl Read) -> Result<Self> {
-        let mut items: [T; N] = [T::default(); N];
-        for index in 0..N {
-            items[index] = T::unpack(reader)?;
-        }
-        Ok(items)
-    }
-}
-
-impl Unpack for CompressionBlock {
-    #[inline]
-    fn unpack(reader: &mut impl Read) -> Result<Self> {
-        let start_offset = u64::unpack(reader)?;
-        let end_offset   = u64::unpack(reader)?;
-
-        Ok(Self {
-            start_offset,
-            end_offset,
-        })
-    }
-}
-
-macro_rules! unpack {
-    ($reader:expr, $($rest:tt)*) => {
-        unpack!(@decl $($rest)*);
-        unpack!(@unpack () ($reader) $($rest)*);
-    };
-
-    (@unpack ($($wrap:tt)*) ($reader:expr) $(,)?) => {};
-
-    (@unpack ($($wrap:tt)*) ($reader:expr) if $($rest:tt)*) => {
-        unpack!(@if ($($wrap)*) ($reader) () $($rest)*);
-    };
-
-    (@if ($($wrap:tt)*) ($reader:expr) ($($cond:tt)*) { $($body:tt)* } $($rest:tt)*) => {
-        if $($cond)* {
-            unpack!(@unpack (Some) ($reader) $($body)*);
-        } else {
-            unpack!(@none $($body)*);
-        }
-        unpack!(@unpack ($($wrap)*) ($reader) $($rest)*);
-    };
-
-    (@if ($($wrap:tt)*) ($reader:expr) ($($cond:tt)*) $tok:tt $($rest:tt)*) => {
-        unpack!(@if ($($wrap)*) ($reader) ($($cond)* $tok) $($rest)*);
-    };
-
-    (@decl $(,)?) => {};
-
-    (@decl if $($rest:tt)*) => {
-        unpack!(@decl_if () $($rest)*);
-    };
-
-    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
-        let $name;
-    };
-
-    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
-        let $name;
-        unpack!(@decl $($rest)*);
-    };
-
-    (@decl_if ($($cond:tt)*) { $($body:tt)* } $($rest:tt)*) => {
-        unpack!(@decl $($body)*);
-        unpack!(@decl $($rest)*);
-    };
-
-    (@decl_if ($($cond:tt)*) $tok:tt $($rest:tt)*) => {
-        unpack!(@decl_if ($($cond)* $tok) $($rest)*);
-    };
-
-    (@none $(,)?) => {};
-
-    (@none if $($rest:tt)*) => {
-        unpack!(@none_if () $($rest)*);
-    };
-
-    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
-        $name = None;
-    };
-
-    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
-        $name = None;
-        unpack!(@none $($rest)*);
-    };
-
-    (@none_if ($cond:expr) { $($body:tt)* } $($rest:tt)*) => {
-        unpack!(@none $($body)*);
-        unpack!(@none $($rest)*);
-    };
-
-    (@none_if ($($cond:tt)*) $tok:tt $($rest:tt)*) => {
-        unpack!(@none_if ($($cond)* $tok) $($rest)*);
-    };
-
-    (@unpack ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
-        unpack!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
-    };
-
-    (@unpack ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
-        unpack!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
-        unpack!(@unpack ($($wrap)*) ($reader) $($rest)*);
-    };
-
-    // FIXME: This never matches! Why?
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident String) => {
-        $name = {
-            let _encoding = unpack!(@attr_encoding $($attrs)*);
-            let _size = <unpack!(@attr_size $($attrs)*)>::unpack($reader)? as usize;
-            let _buffer = vec![0u8; _size];
-            if let Some(_index) = _buffer.iter().position(|_byte| *_byte == 0) {
-                _buffer.truncate(_index);
-            }
-            $($wrap)*(_encoding.parse_vec(_buffer))
-        };
-    };
-
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty) => {
-        $name = $($wrap)*(<$type>::unpack($reader)?);
-    };
-
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:ty]) => {
-        $name = {
-            let _count = <$count>::unpack($reader)? as usize;
-            let mut _items = Vec::with_capacity(_count);
-            for _ in 0..(_count) {
-                _items.push(<$type>::unpack($reader)?);
-            }
-            $($wrap)*(_items)
-        };
-    };
-
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:expr]) => {
-        $name = {
-            let _count = $count;
-            let mut _items = Vec::with_capacity(_count);
-            for _ in 0..(_count) {
-                _items.push(<$type>::unpack($reader)?);
-            }
-            $($wrap)*(_items)
-        };
-    };
-
-    (@attr_size size = $value:expr $(,)?) => {
-        $value
-    };
-
-    (@attr_size size = $value:expr, $($attrs:tt)*) => {
-        $value
-    };
-
-    (@attr_size $attr:ident = $value:expr, $($attrs:tt)*) => {
-        unpack!(@attr_size $($attrs)*);
-    };
-
-    (@attr_size $(,)?) => {
-        u32
-    };
-
-    (@attr_encoding encoding = $value:expr $(,)?) => {
-        $value
-    };
-
-    (@attr_encoding encoding = $value:expr, $($attrs:tt)*) => {
-        $value
-    };
-
-    (@attr_encoding $attr:ident = $value:expr, $($attrs:tt)*) => {
-        unpack!(@attr_encoding $($attrs)*);
-    };
-
-    (@attr_encoding $(,)?) => {
-        Encoding::UTF8
-    };
-}
-
 pub fn read_record_v1(reader: &mut impl Read, filename: String) -> Result<Record> {
-    unpack!(reader,
+    decode!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -348,7 +140,7 @@ pub fn read_record_v1(reader: &mut impl Read, filename: String) -> Result<Record
 }
 
 pub fn read_record_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
-    unpack!(reader,
+    decode!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -360,7 +152,7 @@ pub fn read_record_v2(reader: &mut impl Read, filename: String) -> Result<Record
 }
 
 pub fn read_record_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
-    unpack!(reader,
+    decode!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -377,7 +169,7 @@ pub fn read_record_v3(reader: &mut impl Read, filename: String) -> Result<Record
 }
 
 pub fn read_record_v4(reader: &mut impl Read, filename: String) -> Result<Record> {
-    unpack!(reader,
+    decode!(reader,
         offset: u64,
         size: u64,
         uncompressed_size: u64,
@@ -413,7 +205,7 @@ impl Pak {
         let mut reader = BufReader::new(file);
         let footer_offset = reader.seek(SeekFrom::End(-44))?;
 
-        unpack!(&mut reader,
+        decode!(&mut reader,
             magic: u32,
             version: u32,
             index_offset: u64,
@@ -451,7 +243,7 @@ impl Pak {
         reader.seek(SeekFrom::Start(index_offset))?;
         let mount_point = read_path(&mut reader, options.encoding)?;
 
-        unpack!(&mut reader, entry_count: u32);
+        decode!(&mut reader, entry_count: u32);
 
         let mut records = Vec::with_capacity(entry_count as usize);
 

@@ -33,6 +33,8 @@ pub use list::{list, ListOptions, ListStyle};
 
 pub mod util;
 
+pub mod decode;
+
 pub enum Filter<'a> {
     None,
     Paths(Vec<&'a str>),
