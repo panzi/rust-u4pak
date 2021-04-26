@@ -59,17 +59,31 @@ impl Default for ListOptions<'_> {
 }
 
 pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
-    if let Some(order) = options.order {
-        let mut records = pak.into_records();
+    match (options.order, options.filter) {
+        (Some(order), Some(filter)) => {
+            let mut records = pak.filtered_records(filter);
 
-        sort(&mut records, order);
-        list_records(&records, options)
-    } else {
-        list_records(pak.records(), options)
+            sort(&mut records, order);
+            list_records(&records, options)
+        }
+        (Some(order), None) => {
+            let mut records = pak.into_records();
+
+            sort(&mut records, order);
+            list_records(&records, options)
+        }
+        (None, Some(filter)) => {
+            let records = pak.filtered_records(filter);
+
+            list_records(&records, options)
+        }
+        (None, None) => {
+            list_records(pak.records(), options)
+        }
     }
 }
 
-pub fn list_records(records: &[Record], options: ListOptions) -> Result<()> {
+pub fn list_records(records: &[impl AsRef<Record>], options: ListOptions) -> Result<()> {
     match options.style {
         ListStyle::Table { human_readable } => {
             let mut table: Vec<Vec<String>> = Vec::new();
@@ -81,6 +95,7 @@ pub fn list_records(records: &[Record], options: ListOptions) -> Result<()> {
             };
 
             for record in records {
+                let record = record.as_ref();
                 table.push(vec![
                     format!("{}", record.offset()),
                     fmt_size(record.uncompressed_size()),
@@ -100,7 +115,7 @@ pub fn list_records(records: &[Record], options: ListOptions) -> Result<()> {
             let sep = [if null_separated { 0 } else { '\n' as u8 }];
             let mut stdout = std::io::stdout();
             for record in records {
-                stdout.write_all(record.filename().as_bytes())?;
+                stdout.write_all(record.as_ref().filename().as_bytes())?;
                 stdout.write_all(&sep)?;
             }
         }

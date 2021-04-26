@@ -26,14 +26,14 @@ pub type Sha1 = [u8; 20];
 pub const NULL_SHA1: Sha1 = [0u8; 20];
 
 macro_rules! check_error {
-    ($error_count:ident, $abort_on_error:expr, $($error:tt)*) => {
+    ($error_count:ident, $abort_on_error:expr, $null_separator:expr, $($error:tt)*) => {
         {
             let error = $($error)*;
             $error_count += 1;
             if $abort_on_error {
                 return Err(error);
             }
-            eprintln!("{}", error);
+            eprint!("{}{}", error, $null_separator);
         }
     };
 }
@@ -129,32 +129,28 @@ pub struct Pak {
 }
 
 pub struct Options {
-    pub check_integrity: bool,
     pub ignore_magic: bool,
     pub encoding: Encoding,
     pub force_version: Option<u32>,
-    pub ignore_null_checksums: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
-            check_integrity: false,
             ignore_magic: false,
             encoding: Encoding::UTF8,
             force_version: None,
-            ignore_null_checksums: false,
         }
     }
 }
 
-pub fn read_path(file: &mut impl Read, encoding: Encoding) -> Result<String> {
+pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     let mut buf = [08; 4];
-    file.read_exact(&mut buf)?;
+    reader.read_exact(&mut buf)?;
     let size = u32::from_le_bytes(buf);
 
     let mut buf = vec![0u8; size as usize];
-    file.read_exact(&mut buf)?;
+    reader.read_exact(&mut buf)?;
     if let Some(index) = buf.iter().position(|byte| *byte == 0) {
         buf.truncate(index);
     }
@@ -237,11 +233,16 @@ impl Pak {
         }
     }
 
-    fn from_file(file: &mut File, options: Options) -> Result<Pak> {
-        let mut reader = BufReader::new(file);
+    #[inline]
+    pub fn from_file(file: &mut File, options: Options) -> Result<Pak> {
+        Self::from_reader(&mut BufReader::new(file), options)
+    }
+
+    pub fn from_reader<R>(reader: &mut R, options: Options) -> Result<Pak>
+    where R: Read, R: Seek {
         let footer_offset = reader.seek(SeekFrom::End(-44))?;
 
-        decode!(&mut reader,
+        decode!(reader,
             magic: u32,
             version: u32,
             index_offset: u64,
@@ -277,15 +278,15 @@ impl Pak {
         }
 
         reader.seek(SeekFrom::Start(index_offset))?;
-        let mount_point = read_path(&mut reader, options.encoding)?;
+        let mount_point = read_path(reader, options.encoding)?;
 
-        decode!(&mut reader, entry_count: u32);
+        decode!(reader, entry_count: u32);
 
         let mut records = Vec::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
-            let filename = read_path(&mut reader, options.encoding)?;
-            let record = read_record(&mut reader, filename)?;
+            let filename = read_path(reader, options.encoding)?;
+            let record = read_record(reader, filename)?;
             records.push(record);
         }
 
@@ -294,7 +295,7 @@ impl Pak {
             return Err(Error::new("index bleeds into footer".to_owned()));
         }
 
-        let pak = Self {
+        Ok(Self {
             version,
             index_offset,
             index_size,
@@ -302,21 +303,22 @@ impl Pak {
             index_sha1,
             mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
             records,
-        };
-
-        if options.check_integrity {
-            pak.check_integrity(&mut reader, true, options.ignore_null_checksums)?;
-        }
-
-        Ok(pak)
+        })
     }
 
-    pub fn check_integrity<R>(&self, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool) -> Result<usize>
+    #[inline]
+    pub fn check_integrity<R>(&self, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
+    where R: Read, R: Seek {
+        self.check_integrity_of(&self.records, reader, abort_on_error, ignore_null_checksums, null_separated)
+    }
+
+    pub fn check_integrity_of<R>(&self, records: &[impl AsRef<Record>], reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
     where R: Read, R: Seek {
         let mut hasher = Sha1Hasher::new();
         let mut buffer = vec![0u8; BUFFER_SIZE];
         let mut error_count = 0usize;
         let mut actual_digest = [0u8; 20];
+        let null_separator = if null_separated { '\0' } else { '\n' };
 
         let mut check_data = |filename: &str, offset: u64, size: u64, checksum: &Sha1| -> Result<()> {
             if ignore_null_checksums && checksum == &NULL_SHA1 {
@@ -351,19 +353,20 @@ impl Pak {
         };
 
         if let Err(error) = check_data("<archive index>", self.index_offset, self.index_size, &self.index_sha1) {
-            check_error!(error_count, abort_on_error, error);
+            check_error!(error_count, abort_on_error, null_separator, error);
         }
 
-        for record in &self.records {
+        for record in records {
+            let record = record.as_ref();
             if !COMPR_METHODS.contains(&record.compression_method()) {
-                check_error!(error_count, abort_on_error, Error::new(format!(
+                check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
                     "unknown compression method: 0x{:02x}",
                     record.compression_method(),
                 )).with_path(record.filename()));
             }
 
             if record.compression_method() == COMPR_NONE && record.size() != record.uncompressed_size() {
-                check_error!(error_count, abort_on_error, Error::new(format!(
+                check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
                     "file is not compressed but compressed size ({}) differes from uncompressed size ({})",
                     record.size(),
                     record.uncompressed_size(),
@@ -372,13 +375,13 @@ impl Pak {
 
             let offset = self.data_offset(record);
             if offset + record.size() > self.index_offset {
-                check_error!(error_count, abort_on_error, Error::new(
+                check_error!(error_count, abort_on_error, null_separator, Error::new(
                     "data bleeds into index".to_string()
                 ).with_path(record.filename()));
             }
 
             if let Err(error) = check_data(record.filename(), offset, record.size(), record.sha1()) {
-                check_error!(error_count, abort_on_error, error);
+                check_error!(error_count, abort_on_error, null_separator, error);
             }
         }
 
@@ -452,5 +455,21 @@ impl Pak {
     #[inline]
     pub fn data_offset(&self, record: &Record) -> u64 {
         self.header_size(record) + record.offset()
+    }
+
+    pub fn filtered_records(&self, paths: &[impl AsRef<str>]) -> Vec<&Record> {
+        // TODO: support directories and stuff
+        let paths: std::collections::HashSet<&str> = paths.iter()
+            .map(|path| path.as_ref())
+            .collect();
+        let mut records = Vec::new();
+
+        for record in &self.records {
+            if paths.contains(record.filename()) {
+                records.push(record);
+            }
+        }
+
+        return records;
     }
 }

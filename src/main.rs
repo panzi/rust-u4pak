@@ -15,6 +15,8 @@
 
 use clap::{Arg, App, SubCommand};
 use std::convert::TryInto;
+use std::io::BufReader;
+use std::fs::File;
 
 pub mod pak;
 pub use pak::{Pak, Options};
@@ -53,7 +55,7 @@ impl<'a> Filter<'a> {
         }
     }
 
-    pub fn as_ref(&self) -> Option<&[&'a str]> {
+    pub fn as_option(&self) -> Option<&[&'a str]> {
         match self {
             Filter::None => None,
             Filter::Paths(paths) => Some(&paths[..])
@@ -118,11 +120,24 @@ fn arg_force_version<'a, 'b>() -> Arg<'a, 'b> {
         .help("Assume package to be of given version.")
 }
 
-fn arg_ignore_null_checksumsc<'a, 'b>() -> Arg<'a, 'b> {
+fn arg_ignore_null_checksums<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("ignore-null-checksums")
         .long("ignore-null-checksums")
         .takes_value(false)
         .help("Ignore checksums that are all zeros.")
+}
+
+fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("print0")
+    .long("print0")
+    .short("0")
+    .requires("only-names")
+    .takes_value(false)
+    .help(
+        "Separate file names with NULL bytes. \
+        This is useful for use with xargs --null, to be sure that \
+        possible new lines in file names aren't interpreted as \
+        file name separators.")
 }
 
 fn run() -> Result<()> {
@@ -159,26 +174,24 @@ fn run() -> Result<()> {
                     \n\
                     u4pak list --sort=-size,name")
             )
-            .arg(Arg::with_name("print0")
-                .long("print0")
-                .short("0")
-                .requires("only-names")
-                .takes_value(false)
-                .help(
-                    "Separate file names with NULL bytes. \
-                     This is useful for use with xargs --null, to be sure that \
-                     possible new lines in file names aren't interpreted as \
-                     file name separators."))
             .arg(arg_check_integrity())
+            .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
-            .arg(arg_ignore_null_checksumsc())
+            .arg(arg_ignore_null_checksums())
             .arg(arg_human_readable())
             .arg(arg_package())
             .arg(arg_paths()))
         // TODO
-        .subcommand(SubCommand::with_name("check"))
+        .subcommand(SubCommand::with_name("check")
+            .arg(arg_print0())
+            .arg(arg_ignore_magic())
+            .arg(arg_encoding())
+            .arg(arg_force_version())
+            .arg(arg_ignore_null_checksums())
+            .arg(arg_package())
+            .arg(arg_paths()))
         .subcommand(SubCommand::with_name("unpack"))
         .subcommand(SubCommand::with_name("pack"))
         .subcommand(SubCommand::with_name("mount"));
@@ -214,13 +227,29 @@ fn run() -> Result<()> {
                 None
             };
 
-            let pak = Pak::from_path(path, Options {
-                check_integrity,
+            let file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) => return Err(Error::io_with_path(error, path))
+            };
+            let mut reader = BufReader::new(file);
+
+            let pak = Pak::from_reader(&mut reader, Options {
                 ignore_magic,
                 encoding,
                 force_version,
-                ignore_null_checksums,
             })?;
+
+            if check_integrity {
+                match &filter {
+                    Filter::None => {
+                        pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
+                    }
+                    Filter::Paths(paths) => {
+                        let records = pak.filtered_records(&paths);
+                        pak.check_integrity_of(&records[..], &mut reader, true, ignore_null_checksums, null_separated)?;
+                    }
+                }
+            }
 
             list(pak, ListOptions {
                 order,
@@ -229,8 +258,12 @@ fn run() -> Result<()> {
                 } else {
                     ListStyle::Table { human_readable }
                 },
-                filter: filter.as_ref(),
+                filter: filter.as_option(),
             })?;
+        }
+        ("check", Some(_args)) => {
+            // TODO
+            panic!("not implemented");
         }
         (cmd, _) => {
             return Err(Error::new(format!(

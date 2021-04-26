@@ -133,3 +133,9 @@ impl Record {
         self.compression_block_size
     }
 }
+
+impl AsRef<Record> for Record {
+    fn as_ref(&self) -> &Record {
+        &self
+    }
+}

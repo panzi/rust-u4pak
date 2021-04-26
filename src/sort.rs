@@ -104,12 +104,12 @@ fn make_chain(cmp1: Box<dyn Fn(&Record, &Record) -> Ordering>, mut iter: std::sl
     }
 }
 
-pub fn sort(list: &mut Vec<Record>, order: &Order) {
+pub fn sort(list: &mut Vec<impl AsRef<Record>>, order: &Order) {
     let mut iter = order.iter();
 
     if let Some(first_key) = iter.next() {
         let cmp = make_chain(Box::new(first_key.to_cmp()), iter);
-        list.sort_by(cmp);
+        list.sort_by(|a, b| cmp(a.as_ref(), b.as_ref()));
     }
 }
 

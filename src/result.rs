@@ -87,6 +87,17 @@ impl Error {
             error_type: self.error_type,
         }
     }
+
+    #[inline]
+    pub fn with_path_if_none(self, path: impl AsRef<Path>) -> Self {
+        if self.path.is_some() {
+            return self;
+        }
+        Self {
+            path: Some(path.as_ref().to_path_buf()),
+            error_type: self.error_type,
+        }
+    }
 }
 
 impl std::fmt::Display for ErrorType {
