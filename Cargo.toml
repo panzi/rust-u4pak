@@ -8,3 +8,7 @@ license-file = "LICENSE.txt"
 [dependencies]
 clap = "2.33.3"
 rust-crypto = "^0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# for sendfile() and fuse support
+libc = "0.2.94"

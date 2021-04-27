@@ -474,4 +474,27 @@ impl Pak {
     pub fn data_offset(&self, record: &Record) -> u64 {
         self.header_size(record) + record.offset()
     }
+
+    pub fn unpack(&self, record: &Record, input: &mut File, outdir: impl AsRef<Path>) -> Result<()> {
+        if record.encrypted() {
+            return Err(Error::new("encryption is not supported".to_string())
+                .with_path(record.filename()));
+        }
+
+        match record.compression_method() {
+            self::COMPR_NONE => {
+
+            }
+            self::COMPR_ZLIB => {
+
+            }
+            _ => {
+                return Err(Error::new(format!(
+                        "unsupported compression method: {}",
+                        compression_method_name(record.compression_method())))
+                    .with_path(record.filename()));
+            }
+        }
+        Ok(())
+    }
 }

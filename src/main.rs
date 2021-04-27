@@ -40,6 +40,11 @@ pub mod decode;
 pub mod filter;
 pub use filter::Filter;
 
+pub mod unpack;
+pub use unpack::unpack;
+
+pub mod io;
+
 fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
     if let Some(paths) = args.values_of("paths") {
         if paths.len() == 0 {
@@ -180,8 +185,10 @@ fn run() -> Result<()> {
             .arg(arg_package())
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("unpack"))
-        .subcommand(SubCommand::with_name("pack"))
-        .subcommand(SubCommand::with_name("mount"));
+        .subcommand(SubCommand::with_name("pack"));
+
+    #[cfg(target_os = "linux")]
+    let app = app.subcommand(SubCommand::with_name("mount"));
 
     let matches = app.get_matches();
 
@@ -286,9 +293,19 @@ fn run() -> Result<()> {
             if error_count == 0 {
                 print!("All ok{}", sep);
             } else {
-                print!("Found {} error(s={}", error_count, sep);
+                print!("Found {} error(s){}", error_count, sep);
                 std::process::exit(1);
             }
+        }
+        ("unpack", Some(_args)) => {
+            panic!("unpack is not implemented yet");
+        }
+        ("pack", Some(_args)) => {
+            panic!("pack is not implemented yet");
+        }
+        #[cfg(target_os = "linux")]
+        ("mount", Some(_args)) => {
+            panic!("mount is not implemented yet");
         }
         (cmd, _) => {
             return Err(Error::new(format!(
