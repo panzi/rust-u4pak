@@ -309,11 +309,14 @@ impl Pak {
     #[inline]
     pub fn check_integrity<R>(&self, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
     where R: Read, R: Seek {
-        self.check_integrity_of(&self.records, reader, abort_on_error, ignore_null_checksums, null_separated)
+        self.check_integrity_of(self.records.iter(), reader, abort_on_error, ignore_null_checksums, null_separated)
     }
 
-    pub fn check_integrity_of<R>(&self, records: &[impl AsRef<Record>], reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
-    where R: Read, R: Seek {
+    pub fn check_integrity_of<I, Item, R>(&self, records: I, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
+    where
+        Item: AsRef<Record>,
+        I: std::iter::Iterator<Item=Item>,
+        R: Read, R: Seek {
         let mut hasher = Sha1Hasher::new();
         let mut buffer = vec![0u8; BUFFER_SIZE];
         let mut error_count = 0usize;
@@ -455,89 +458,5 @@ impl Pak {
     #[inline]
     pub fn data_offset(&self, record: &Record) -> u64 {
         self.header_size(record) + record.offset()
-    }
-
-    pub fn filtered_records(&self, paths: &[impl AsRef<str>]) -> Vec<&Record> {
-        let paths = Filter::from_paths(paths);
-        let mut records = Vec::new();
-
-        for record in &self.records {
-            if paths.contains(record.filename()) {
-                records.push(record);
-            }
-        }
-
-        return records;
-    }
-}
-
-struct Filter<'a> {
-    nodes: std::collections::HashMap<&'a str, Filter<'a>>,
-    included: bool,
-}
-
-impl<'a> Filter<'a> {
-    pub fn new() -> Self {
-        Self {
-            nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
-            included: false,
-        }
-    }
-
-    pub fn from_paths<S: AsRef<str>>(paths: &'a [S]) -> Self where S: 'a {
-        let mut filter = Self {
-            nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
-            included: false,
-        };
-
-        for path in paths {
-            filter.insert(path.as_ref());
-        }
-
-        filter
-    }
-
-    #[inline]
-    pub fn insert(&mut self, path: &'a str) {
-        self.insert_iter(path.trim_matches('/').split('/'))
-    }
-
-    pub fn insert_iter<I>(&mut self, mut path: I)
-    where I: std::iter::Iterator<Item=&'a str> {
-        if let Some(name) = path.next() {
-            if name.is_empty() {
-                self.insert_iter(path);
-            } else if let Some(child) = self.nodes.get_mut(name) {
-                child.insert_iter(path);
-            } else {
-                let mut child = Self::new();
-                child.insert_iter(path);
-                self.nodes.insert(name, child);
-            }
-        } else {
-            self.included = true;
-        }
-    }
-
-    #[inline]
-    pub fn contains(&self, path: impl AsRef<str>) -> bool {
-        self.contains_iter(path.as_ref().trim_matches('/').split('/'))
-    }
-
-    pub fn contains_iter<'b, I>(&self, mut path: I) -> bool
-    where I: std::iter::Iterator<Item=&'b str> {
-        if self.included {
-            true
-        } else if let Some(name) = path.next() {
-            if name.is_empty() {
-                self.contains_iter(path)
-            } else if let Some(child) = self.nodes.get(name) {
-                child.contains_iter(path)
-            } else {
-                false
-            }
-        } else {
-            false
-        }
     }
 }

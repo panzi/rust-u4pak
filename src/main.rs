@@ -37,29 +37,18 @@ pub mod util;
 
 pub mod decode;
 
-pub enum Filter<'a> {
-    None,
-    Paths(Vec<&'a str>),
-}
+pub mod filter;
+pub use filter::Filter;
 
-impl<'a> Filter<'a> {
-    pub fn new(args: &'a clap::ArgMatches) -> Self {
-        if let Some(paths) = args.values_of("paths") {
-            if paths.len() == 0 {
-                Filter::None
-            } else {
-                Filter::Paths(paths.collect())
-            }
+fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
+    if let Some(paths) = args.values_of("paths") {
+        if paths.len() == 0 {
+            None
         } else {
-            Filter::None
+            Some(Filter::from_paths(paths))
         }
-    }
-
-    pub fn as_option(&self) -> Option<&[&'a str]> {
-        match self {
-            Filter::None => None,
-            Filter::Paths(paths) => Some(&paths[..])
-        }
+    } else {
+        None
     }
 }
 
@@ -219,7 +208,7 @@ fn run() -> Result<()> {
             let ignore_null_checksums = args.is_present("ignore-null-checksums");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
-            let filter = Filter::new(args);
+            let filter = get_filter(args);
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -240,14 +229,13 @@ fn run() -> Result<()> {
             })?;
 
             if check_integrity {
-                match &filter {
-                    Filter::None => {
-                        pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
-                    }
-                    Filter::Paths(paths) => {
-                        let records = pak.filtered_records(&paths);
-                        pak.check_integrity_of(&records[..], &mut reader, true, ignore_null_checksums, null_separated)?;
-                    }
+                if let Some(filter) = &filter {
+                    let records = pak.records()
+                        .iter()
+                        .filter(|record| filter.contains(record.filename()));
+                    pak.check_integrity_of(records, &mut reader, true, ignore_null_checksums, null_separated)?;
+                } else {
+                    pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
                 }
             }
 
@@ -258,7 +246,7 @@ fn run() -> Result<()> {
                 } else {
                     ListStyle::Table { human_readable }
                 },
-                filter: filter.as_option(),
+                filter,
             })?;
         }
         ("check", Some(_args)) => {

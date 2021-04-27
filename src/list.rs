@@ -30,7 +30,7 @@ pub enum ListStyle {
 pub struct ListOptions<'a> {
     pub order: Option<&'a Order>,
     pub style: ListStyle,
-    pub filter: Option<&'a [&'a str]>,
+    pub filter: Option<crate::Filter<'a>>,
 }
 
 impl ListOptions<'_> {
@@ -59,9 +59,12 @@ impl Default for ListOptions<'_> {
 }
 
 pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
-    match (options.order, options.filter) {
+    match (options.order, &options.filter) {
         (Some(order), Some(filter)) => {
-            let mut records = pak.filtered_records(filter);
+            let mut records = pak.records()
+                .iter()
+                .filter(|record| filter.contains(record.filename()))
+                .collect();
 
             sort(&mut records, order);
             list_records(&records, options)
@@ -73,7 +76,10 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
             list_records(&records, options)
         }
         (None, Some(filter)) => {
-            let records = pak.filtered_records(filter);
+            let records = pak.records()
+                .iter()
+                .filter(|record| filter.contains(record.filename()))
+                .collect::<Vec<_>>();
 
             list_records(&records, options)
         }
