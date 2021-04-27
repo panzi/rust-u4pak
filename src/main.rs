@@ -118,15 +118,14 @@ fn arg_ignore_null_checksums<'a, 'b>() -> Arg<'a, 'b> {
 
 fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("print0")
-    .long("print0")
-    .short("0")
-    .requires("only-names")
-    .takes_value(false)
-    .help(
-        "Separate file names with NULL bytes. \
-        This is useful for use with xargs --null, to be sure that \
-        possible new lines in file names aren't interpreted as \
-        file name separators.")
+        .long("print0")
+        .short("0")
+        .takes_value(false)
+        .help(
+            "Separate file names with NULL bytes. \
+            This is useful for use with xargs --null, to be sure that \
+            possible new lines in file names aren't interpreted as \
+            file name separators.")
 }
 
 fn run() -> Result<()> {
@@ -164,7 +163,7 @@ fn run() -> Result<()> {
                     u4pak list --sort=-size,name")
             )
             .arg(arg_check_integrity())
-            .arg(arg_print0())
+            .arg(arg_print0().requires("only-names"))
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
@@ -172,7 +171,6 @@ fn run() -> Result<()> {
             .arg(arg_human_readable())
             .arg(arg_package())
             .arg(arg_paths()))
-        // TODO
         .subcommand(SubCommand::with_name("check")
             .arg(arg_print0())
             .arg(arg_ignore_magic())
@@ -249,9 +247,48 @@ fn run() -> Result<()> {
                 filter,
             })?;
         }
-        ("check", Some(_args)) => {
-            // TODO
-            panic!("not implemented");
+        ("check", Some(args)) => {
+            let null_separated        = args.is_present("print0");
+            let ignore_magic          = args.is_present("ignore-magic");
+            let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let path = args.value_of("package").unwrap();
+            let filter = get_filter(args);
+
+            let force_version = if let Some(version) = args.value_of("force-version") {
+                Some(version.parse()?)
+            } else {
+                None
+            };
+
+            let file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) => return Err(Error::io_with_path(error, path))
+            };
+            let mut reader = BufReader::new(file);
+
+            let pak = Pak::from_reader(&mut reader, Options {
+                ignore_magic,
+                encoding,
+                force_version,
+            })?;
+
+            let error_count = if let Some(filter) = &filter {
+                let records = pak.records()
+                    .iter()
+                    .filter(|record| filter.contains(record.filename()));
+                pak.check_integrity_of(records, &mut reader, false, ignore_null_checksums, null_separated)?
+            } else {
+                pak.check_integrity(&mut reader, false, ignore_null_checksums, null_separated)?
+            };
+
+            let sep = if null_separated { '\0' } else { '\n' };
+            if error_count == 0 {
+                print!("All ok{}", sep);
+            } else {
+                print!("Found {} error(s={}", error_count, sep);
+                std::process::exit(1);
+            }
         }
         (cmd, _) => {
             return Err(Error::new(format!(
