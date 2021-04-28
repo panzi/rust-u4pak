@@ -8,6 +8,8 @@ license-file = "LICENSE.txt"
 [dependencies]
 clap = "2.33.3"
 rust-crypto = "^0.2"
+flate2 = "1.0.20"
+#flate2 = { version = "1.0.20", features = ["zlib"], default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # for sendfile() and fuse support

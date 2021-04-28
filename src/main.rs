@@ -184,7 +184,22 @@ fn run() -> Result<()> {
             .arg(arg_ignore_null_checksums())
             .arg(arg_package())
             .arg(arg_paths()))
-        .subcommand(SubCommand::with_name("unpack"))
+        .subcommand(SubCommand::with_name("unpack")
+            .arg(arg_print0())
+            .arg(arg_check_integrity())
+            .arg(arg_ignore_magic())
+            .arg(arg_encoding())
+            .arg(arg_force_version())
+            .arg(arg_ignore_null_checksums())
+            .arg(Arg::with_name("outdir")
+                .long("outdir")
+                .short("o")
+                .takes_value(true)
+                .value_name("DIR")
+                .default_value(".")
+                .help("Write unpacked files to DIR."))
+            .arg(arg_package())
+            .arg(arg_paths()))
         .subcommand(SubCommand::with_name("pack"));
 
     #[cfg(target_os = "linux")]
@@ -297,8 +312,48 @@ fn run() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        ("unpack", Some(_args)) => {
-            panic!("unpack is not implemented yet");
+        ("unpack", Some(args)) => {
+            let outdir = args.value_of("outdir").unwrap();
+            let null_separated        = args.is_present("print0");
+            let ignore_magic          = args.is_present("ignore-magic");
+            let check_integrity       = args.is_present("check-integrity");
+            let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let path = args.value_of("package").unwrap();
+            let filter = get_filter(args);
+
+            let force_version = if let Some(version) = args.value_of("force-version") {
+                Some(version.parse()?)
+            } else {
+                None
+            };
+
+            let mut file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) => return Err(Error::io_with_path(error, path))
+            };
+            let mut reader = BufReader::new(&mut file);
+
+            let pak = Pak::from_reader(&mut reader, Options {
+                ignore_magic,
+                encoding,
+                force_version,
+            })?;
+
+            if check_integrity {
+                if let Some(filter) = &filter {
+                    let records = pak.records()
+                        .iter()
+                        .filter(|record| filter.contains(record.filename()));
+                    pak.check_integrity_of(records, &mut reader, true, ignore_null_checksums, null_separated)?;
+                } else {
+                    pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
+                }
+            }
+
+            drop(reader);
+
+            unpack(&pak, &mut file, outdir, &filter)?;
         }
         ("pack", Some(_args)) => {
             panic!("pack is not implemented yet");

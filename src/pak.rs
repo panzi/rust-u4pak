@@ -13,14 +13,15 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{convert::TryFrom, fmt::Display, path::Path};
-use std::fs::File;
+use std::{convert::TryFrom, fmt::Display, io::{BufWriter, Write}, path::Path};
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, BufReader};
 
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
+use flate2::bufread::ZlibDecoder;
 
-use crate::decode;
+use crate::{decode, io::transfer, util::parse_pak_path};
 use crate::decode::Decode;
 use crate::{Record, Result, Error};
 use crate::record::CompressionBlock;
@@ -475,18 +476,60 @@ impl Pak {
         self.header_size(record) + record.offset()
     }
 
-    pub fn unpack(&self, record: &Record, input: &mut File, outdir: impl AsRef<Path>) -> Result<()> {
+    pub fn unpack(&self, record: &Record, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<()> {
         if record.encrypted() {
             return Err(Error::new("encryption is not supported".to_string())
                 .with_path(record.filename()));
         }
 
+        let mut path = outdir.as_ref().to_path_buf();
+        for component in parse_pak_path(record.filename()) {
+            path.push(component);
+        }
+
+        let mut out_file = match OpenOptions::new().write(true).create(true).open(&path) {
+            Ok(file) => file,
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                        OpenOptions::new().write(true).create(true).open(&path)?
+                    } else {
+                        return Err(Error::io_with_path(error, path));
+                    }
+                } else {
+                    return Err(Error::io_with_path(error, path));
+                }
+            }
+        };
+
         match record.compression_method() {
             self::COMPR_NONE => {
-
+                in_file.seek(SeekFrom::Start(self.data_offset(record)))?;
+                transfer(in_file, &mut out_file, record.size() as usize)?;
             }
             self::COMPR_ZLIB => {
+                if let Some(blocks) = record.compression_blocks() {
+                    let base_offset = self.data_offset(record);
 
+                    let mut in_file = BufReader::new(in_file);
+                    let mut out_file = BufWriter::new(out_file);
+
+                    let mut in_buffer = vec![0u8; record.compression_block_size() as usize];
+                    let mut out_buffer = Vec::new();
+
+                    for block in blocks {
+                        let block_size = block.end_offset - block.start_offset;
+                        in_buffer.resize(block_size as usize, 0);
+                        in_file.seek(SeekFrom::Start(base_offset + block.start_offset))?;
+                        in_file.read_exact(&mut in_buffer)?;
+
+                        let mut zlib = ZlibDecoder::new(&in_buffer[..]);
+                        out_buffer.clear();
+                        zlib.read_to_end(&mut out_buffer)?;
+                        out_file.write_all(&out_buffer)?;
+                    }
+                }
             }
             _ => {
                 return Err(Error::new(format!(

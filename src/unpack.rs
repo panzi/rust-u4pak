@@ -20,12 +20,8 @@ use crate::Result;
 use crate::Pak;
 use crate::Filter;
 
-pub fn unpack<'a, R>(pak: &Pak, input: &mut File, outdir: impl AsRef<Path>, filter: &Option<Filter<'a>>) -> Result<()> {
+pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, filter: &Option<Filter<'a>>) -> Result<()> {
     let outdir = outdir.as_ref();
-
-    if !outdir.metadata()?.is_dir() {
-        std::fs::create_dir_all(outdir)?;
-    }
 
     if let Some(filter) = filter {
         let records = pak.records()
@@ -33,11 +29,11 @@ pub fn unpack<'a, R>(pak: &Pak, input: &mut File, outdir: impl AsRef<Path>, filt
             .filter(|record| filter.contains(record.filename()));
 
         for record in records {
-            pak.unpack(record, input, outdir)?;
+            pak.unpack(record, in_file, outdir)?;
         }
     } else {
         for record in pak.records() {
-            pak.unpack(record, input, outdir)?;
+            pak.unpack(record, in_file, outdir)?;
         }
     }
     Ok(())

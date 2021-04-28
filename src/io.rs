@@ -14,13 +14,13 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 #[cfg(target_os = "linux")]
-pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, count: usize) -> std::io::Result<()> {
+pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, size: usize) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd;
 
     let in_fd  = in_file.as_raw_fd();
     let out_fd = out_file.as_raw_fd();
 
-    let mut remaining = count;
+    let mut remaining = size;
     while remaining > 0 {
         unsafe {
             let result = libc::sendfile(out_fd, in_fd, std::ptr::null_mut(), remaining as libc::size_t);
@@ -37,13 +37,14 @@ pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, count
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, count: usize) -> std::io::Result<()> {
+pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, size: usize) -> std::io::Result<()> {
     use std::io::{Read, Write};
     use crate::pak::BUFFER_SIZE;
 
-    let mut buf = [0u8; BUFFER_SIZE];
+    // needs to be heap allocated since Windows has small stack sizes
+    let mut buf = vec![0u8; BUFFER_SIZE];
 
-    let mut remaining = count;
+    let mut remaining = size;
     while remaining >= BUFFER_SIZE {
         in_file.read_exact(&mut buf)?;
         out_file.write_all(&buf)?;
