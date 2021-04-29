@@ -9,6 +9,7 @@ for fun, ease of use (standalone binary), and hopefully speed.
 TODO
 ----
 
+* [x] info
 * [x] list
 * [x] check
 * [x] unpack

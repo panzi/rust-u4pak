@@ -30,6 +30,9 @@ pub use sort::{DEFAULT_ORDER, SortKey, parse_order};
 pub mod record;
 pub use record::Record;
 
+pub mod info;
+pub use info::info;
+
 pub mod list;
 pub use list::{list, ListOptions, ListStyle};
 
@@ -139,6 +142,14 @@ fn run() -> Result<()> {
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
     let app = app
+        .subcommand(SubCommand::with_name("info")
+            .alias("i")
+            .about("Show summarized information of a package.")
+            .arg(arg_human_readable())
+            .arg(arg_ignore_magic())
+            .arg(arg_encoding())
+            .arg(arg_force_version())
+            .arg(arg_package()))
         .subcommand(SubCommand::with_name("list")
             .alias("l")
             .about("List content of a package.")
@@ -177,6 +188,8 @@ fn run() -> Result<()> {
             .arg(arg_package())
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("check")
+            .alias("c")
+            .about("Check concistency of a package.")
             .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -185,6 +198,8 @@ fn run() -> Result<()> {
             .arg(arg_package())
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("unpack")
+            .alias("u")
+            .about("Unpack content of a package.")
             .arg(arg_print0())
             .arg(arg_check_integrity())
             .arg(arg_ignore_magic())
@@ -200,14 +215,60 @@ fn run() -> Result<()> {
                 .help("Write unpacked files to DIR."))
             .arg(arg_package())
             .arg(arg_paths()))
-        .subcommand(SubCommand::with_name("pack"));
+        .subcommand(SubCommand::with_name("pack")
+            .alias("p")
+            .about("Create a new package.")
+            .arg(Arg::with_name("version")
+                .long("version")
+                .short("v")
+                .takes_value(true)
+                .default_value("3")
+                .help("Create package of given VERSION. Supported versions are: 1, 2, and 3"))
+            .arg(arg_package()));
 
     #[cfg(target_os = "linux")]
-    let app = app.subcommand(SubCommand::with_name("mount"));
+    let app = app.subcommand(SubCommand::with_name("mount")
+        .alias("m")
+        .about("Mount package as read-only filesystem.")
+        .arg(arg_check_integrity())
+        .arg(arg_ignore_magic())
+        .arg(arg_encoding())
+        .arg(arg_force_version())
+        .arg(arg_ignore_null_checksums())
+        .arg(Arg::with_name("foregound")
+            .long("foreground")
+            .short("f")
+            .takes_value(false)
+            .help("Keep process in foreground."))
+        .arg(arg_package())
+        .arg(Arg::with_name("mountpt")
+            .index(2)
+            .required(true)
+            .value_name("MOUNTPT")));
 
     let matches = app.get_matches();
 
     match matches.subcommand() {
+        ("info", Some(args)) => {
+            let human_readable        = args.is_present("human-readable");
+            let ignore_magic          = args.is_present("ignore-magic");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let path = args.value_of("package").unwrap();
+
+            let force_version = if let Some(version) = args.value_of("force-version") {
+                Some(version.parse()?)
+            } else {
+                None
+            };
+
+            let pak = Pak::from_path(&path, Options {
+                ignore_magic,
+                encoding,
+                force_version,
+            })?;
+
+            info(&pak, human_readable)?;
+        }
         ("list", Some(args)) => {
             let order = if let Some(order) = args.value_of("sort") {
                 Some(parse_order(order)?)
