@@ -46,6 +46,9 @@ pub use filter::Filter;
 pub mod unpack;
 pub use unpack::unpack;
 
+pub mod pack;
+pub use pack::pack;
+
 pub mod io;
 
 fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
@@ -224,7 +227,12 @@ fn run() -> Result<()> {
                 .takes_value(true)
                 .default_value("3")
                 .help("Create package of given VERSION. Supported versions are: 1, 2, and 3"))
-            .arg(arg_package()));
+            .arg(arg_package())
+            .arg(Arg::with_name("paths")
+                .index(2)
+                .multiple(true)
+                .value_name("PATH")
+                .help("Pack these files.")));
 
     #[cfg(target_os = "linux")]
     let app = app.subcommand(SubCommand::with_name("mount")

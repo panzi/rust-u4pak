@@ -26,11 +26,13 @@ pub enum SortKey {
     Size,
     ComprMethod,
     UncomprSize,
+    ComprBlockSize,
     RevName,
     RevOffset,
     RevSize,
     RevComprMethod,
     RevUncomprSize,
+    RevComprBlockSize,
 }
 
 pub type Order = [SortKey];
@@ -52,6 +54,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::ComprMethod)
         } else if value.eq_ignore_ascii_case("uncompressed-size") {
             Ok(SortKey::UncomprSize)
+        } else if value.eq_ignore_ascii_case("compression-block-size") {
+            Ok(SortKey::ComprBlockSize)
         } else if value.eq_ignore_ascii_case("-name") {
             Ok(SortKey::RevName)
         } else if value.eq_ignore_ascii_case("-size") || value.eq_ignore_ascii_case("-compressed-size") {
@@ -62,6 +66,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::RevComprMethod)
         } else if value.eq_ignore_ascii_case("-uncompressed-size") {
             Ok(SortKey::RevUncomprSize)
+        } else if value.eq_ignore_ascii_case("-compression-block-size") {
+            Ok(SortKey::RevComprBlockSize)
         } else {
             Err(Error::new(format!("illegal argument --sort={:?}", value)))
         }
@@ -72,17 +78,19 @@ impl SortKey {
     #[inline]
     pub fn to_cmp(&self) -> impl Fn(&Record, &Record) -> Ordering {
         match self {
-            SortKey::Name           => |a: &Record, b: &Record| a.filename().cmp(&b.filename()),
-            SortKey::Size           => |a: &Record, b: &Record| a.size().cmp(&b.size()),
-            SortKey::Offset         => |a: &Record, b: &Record| a.offset().cmp(&b.offset()),
-            SortKey::ComprMethod    => |a: &Record, b: &Record| a.compression_method().cmp(&b.compression_method()),
-            SortKey::UncomprSize    => |a: &Record, b: &Record| a.uncompressed_size().cmp(&b.uncompressed_size()),
+            SortKey::Name              => |a: &Record, b: &Record| a.filename().cmp(&b.filename()),
+            SortKey::Size              => |a: &Record, b: &Record| a.size().cmp(&b.size()),
+            SortKey::Offset            => |a: &Record, b: &Record| a.offset().cmp(&b.offset()),
+            SortKey::ComprMethod       => |a: &Record, b: &Record| a.compression_method().cmp(&b.compression_method()),
+            SortKey::UncomprSize       => |a: &Record, b: &Record| a.uncompressed_size().cmp(&b.uncompressed_size()),
+            SortKey::ComprBlockSize    => |a: &Record, b: &Record| a.compression_block_size().cmp(&b.compression_block_size()),
 
-            SortKey::RevName        => |a: &Record, b: &Record| b.filename().cmp(&a.filename()),
-            SortKey::RevSize        => |a: &Record, b: &Record| b.size().cmp(&a.size()),
-            SortKey::RevOffset      => |a: &Record, b: &Record| b.offset().cmp(&a.offset()),
-            SortKey::RevComprMethod => |a: &Record, b: &Record| b.compression_method().cmp(&a.compression_method()),
-            SortKey::RevUncomprSize => |a: &Record, b: &Record| b.uncompressed_size().cmp(&a.uncompressed_size()),
+            SortKey::RevName           => |a: &Record, b: &Record| b.filename().cmp(&a.filename()),
+            SortKey::RevSize           => |a: &Record, b: &Record| b.size().cmp(&a.size()),
+            SortKey::RevOffset         => |a: &Record, b: &Record| b.offset().cmp(&a.offset()),
+            SortKey::RevComprMethod    => |a: &Record, b: &Record| b.compression_method().cmp(&a.compression_method()),
+            SortKey::RevUncomprSize    => |a: &Record, b: &Record| b.uncompressed_size().cmp(&a.uncompressed_size()),
+            SortKey::RevComprBlockSize => |a: &Record, b: &Record| b.compression_block_size().cmp(&a.compression_block_size()),
         }
     }
 }

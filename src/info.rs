@@ -24,14 +24,15 @@ pub fn info(pak: &Pak, human_readable: bool) -> Result<()> {
         |size: u64| format!("{}", size)
     };
 
-    let mut sum_size = 0;
+    let mut sum_size              = 0;
     let mut sum_uncompressed_size = 0;
-    let mut uncompr_count = 0;
-    let mut zlib_count = 0;
-    let mut bias_speed_count = 0;
-    let mut bias_memory_count = 0;
-    let mut other_count = 0;
-    let mut encrypted_count = 0;
+    let mut uncompr_count     = 0usize;
+    let mut zlib_count        = 0usize;
+    let mut bias_speed_count  = 0usize;
+    let mut bias_memory_count = 0usize;
+    let mut other_count       = 0usize;
+    let mut encrypted_count   = 0usize;
+    // TODO: min/max (uncompressed/compression block) size
 
     for record in pak.records() {
         sum_size += record.size();
@@ -50,7 +51,8 @@ pub fn info(pak: &Pak, human_readable: bool) -> Result<()> {
 
     print_headless_table(
         &[
-            vec!["Version:",                   &format!("{}", pak.version())],
+            vec!["Pak Version:",               &format!("{}", pak.version())],
+            vec!["Mount Point:",               pak.mount_point().unwrap_or("")],
             vec!["Sum Compr. Size:",           &fmt_size(sum_size)],
             vec!["Sum Uncompr. Size:",         &fmt_size(sum_uncompressed_size)],
             vec!["File Count:",                &format!("{}", pak.records().len())],

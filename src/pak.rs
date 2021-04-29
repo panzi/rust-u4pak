@@ -30,6 +30,8 @@ pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
 
+pub const DEFAULT_BLOCK_SIZE: u32 = 64 * 1024;
+
 pub const COMPR_NONE       : u32 = 0x00;
 pub const COMPR_ZLIB       : u32 = 0x01;
 pub const COMPR_BIAS_MEMORY: u32 = 0x10;
@@ -56,7 +58,7 @@ macro_rules! check_error {
 
 pub fn compression_method_name(compression_method: u32) -> &'static str {
     match compression_method {
-        COMPR_NONE => "none",
+        COMPR_NONE => "-",
         COMPR_ZLIB => "zlib",
         COMPR_BIAS_MEMORY => "bias memory",
         COMPR_BIAS_SPEED  => "bias speed",
@@ -433,8 +435,11 @@ impl Pak {
     }
 
     #[inline]
-    pub fn mount_point(&self) -> &Option<String> {
-        &self.mount_point
+    pub fn mount_point(&self) -> Option<&str> {
+        match &self.mount_point {
+            Some(mount_point) => Some(mount_point),
+            None => None
+        }
     }
 
     #[inline]

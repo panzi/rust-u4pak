@@ -106,6 +106,7 @@ pub fn list_records(records: &[impl AsRef<Record>], options: ListOptions) -> Res
                     format!("{}", record.offset()),
                     fmt_size(record.uncompressed_size()),
                     compression_method_name(record.compression_method()).to_owned(),
+                    fmt_size(record.compression_block_size() as u64),
                     fmt_size(record.size()),
                     HexDisplay::new(record.sha1()).to_string(),
                     record.filename().to_owned(),
@@ -113,8 +114,8 @@ pub fn list_records(records: &[impl AsRef<Record>], options: ListOptions) -> Res
             }
 
             print_table(
-                &["Offset", "Size", "Compr-Method", "Compr-Size", "SHA1", "Filename"],
-                 &[Right,    Right,  Left,           Right,        Right,  Left],
+                &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "SHA1", "Filename"],
+                 &[Right,    Right,  Left,           Right,              Right,        Right,  Left],
                 &table);
         }
         ListStyle::OnlyNames { null_separated } => {
