@@ -227,6 +227,7 @@ fn run() -> Result<()> {
                 .takes_value(true)
                 .default_value("3")
                 .help("Create package of given VERSION. Supported versions are: 1, 2, and 3"))
+            .arg(arg_encoding())
             .arg(arg_package())
             .arg(Arg::with_name("paths")
                 .index(2)
