@@ -13,7 +13,12 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::pak::Sha1;
+use std::io::{Read, Write};
+
+use crate::pak::{Sha1, COMPR_NONE};
+use crate::decode;
+use crate::decode::Decode;
+use crate::Result;
 
 #[derive(Debug)]
 pub struct Record {
@@ -146,6 +151,71 @@ impl Record {
     #[inline]
     pub fn compression_block_size(&self) -> u32 {
         self.compression_block_size
+    }
+
+    pub fn read_v1(reader: &mut impl Read, filename: String) -> Result<Record> {
+        decode!(reader,
+            offset: u64,
+            size: u64,
+            uncompressed_size: u64,
+            compression_method: u32,
+            timestamp: u64,
+            sha1: Sha1,
+        );
+
+        Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, sha1))
+    }
+
+    pub fn read_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
+        decode!(reader,
+            offset: u64,
+            size: u64,
+            uncompressed_size: u64,
+            compression_method: u32,
+            sha1: Sha1,
+        );
+
+        Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, sha1))
+    }
+
+    pub fn read_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
+        decode!(reader,
+            offset: u64,
+            size: u64,
+            uncompressed_size: u64,
+            compression_method: u32,
+            sha1: Sha1,
+            if compression_method != COMPR_NONE {
+                compression_blocks: CompressionBlock [u32],
+            }
+            encrypted: u8,
+            compression_block_size: u32,
+        );
+
+        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+    }
+
+    pub fn read_v4(reader: &mut impl Read, filename: String) -> Result<Record> {
+        decode!(reader,
+            offset: u64,
+            size: u64,
+            uncompressed_size: u64,
+            compression_method: u32,
+            sha1: Sha1,
+            if compression_method != COMPR_NONE {
+                compression_blocks: CompressionBlock [u32],
+            }
+            encrypted: u8,
+            compression_block_size: u32,
+            _unknown: u32,
+        );
+
+        Ok(Record::v4(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+    }
+
+    pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {
+        
+        Ok(())
     }
 }
 

@@ -24,7 +24,6 @@ use flate2::bufread::ZlibDecoder;
 use crate::{decode, io::transfer, util::parse_pak_path};
 use crate::decode::Decode;
 use crate::{Record, Result, Error};
-use crate::record::CompressionBlock;
 
 pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
@@ -176,66 +175,6 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     encoding.parse_vec(buf)
 }
 
-pub fn read_record_v1(reader: &mut impl Read, filename: String) -> Result<Record> {
-    decode!(reader,
-        offset: u64,
-        size: u64,
-        uncompressed_size: u64,
-        compression_method: u32,
-        timestamp: u64,
-        sha1: Sha1,
-    );
-
-    Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, sha1))
-}
-
-pub fn read_record_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
-    decode!(reader,
-        offset: u64,
-        size: u64,
-        uncompressed_size: u64,
-        compression_method: u32,
-        sha1: Sha1,
-    );
-
-    Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, sha1))
-}
-
-pub fn read_record_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
-    decode!(reader,
-        offset: u64,
-        size: u64,
-        uncompressed_size: u64,
-        compression_method: u32,
-        sha1: Sha1,
-        if compression_method != COMPR_NONE {
-            compression_blocks: CompressionBlock [u32],
-        }
-        encrypted: u8,
-        compression_block_size: u32,
-    );
-
-    Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
-}
-
-pub fn read_record_v4(reader: &mut impl Read, filename: String) -> Result<Record> {
-    decode!(reader,
-        offset: u64,
-        size: u64,
-        uncompressed_size: u64,
-        compression_method: u32,
-        sha1: Sha1,
-        if compression_method != COMPR_NONE {
-            compression_blocks: CompressionBlock [u32],
-        }
-        encrypted: u8,
-        compression_block_size: u32,
-        _unknown: u32,
-    );
-
-    Ok(Record::v4(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
-}
-
 impl Pak {
     pub fn from_path(path: impl AsRef<Path>, options: Options) -> Result<Pak> {
         match File::open(&path) {
@@ -279,11 +218,11 @@ impl Pak {
         }
 
         let read_record = match version {
-            1 => read_record_v1,
-            2 => read_record_v2,
-            3 => read_record_v3,
-            4 => read_record_v4,
-            7 => read_record_v3,
+            1 => Record::read_v1,
+            2 => Record::read_v2,
+            3 => Record::read_v3,
+            4 => Record::read_v4,
+            7 => Record::read_v3, // TODO: sha1 sums seems to be wrong
             _ => {
                 return Err(Error::new(format!("unsupported version: {}", version)));
             }

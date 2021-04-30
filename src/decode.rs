@@ -114,11 +114,11 @@ macro_rules! decode {
         decode!(@decl_if () $($rest)*);
     };
 
-    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+    (@decl $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         let $name;
     };
 
-    (@decl $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+    (@decl $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         let $name;
         decode!(@decl $($rest)*);
     };
@@ -138,11 +138,11 @@ macro_rules! decode {
         decode!(@none_if () $($rest)*);
     };
 
-    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+    (@none $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
         $name = None;
     };
 
-    (@none $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+    (@none $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
         $name = None;
         decode!(@none $($rest)*);
     };
@@ -156,44 +156,31 @@ macro_rules! decode {
         decode!(@none_if ($($cond)* $tok) $($rest)*);
     };
 
-    (@decode ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
-        decode!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
+    (@decode ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])? $(,)?) => {
+        decode!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
     };
 
-    (@decode ($($wrap:tt)*) ($reader:expr) $(#[$($attrs:tt)*])? $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
-        decode!(@read ($($wrap)*) ($reader) ($($($attrs)*)?) $name $type $([$($count)*])?);
+    (@decode ($($wrap:tt)*) ($reader:expr) $name:ident : $type:ty $([$($count:tt)*])?, $($rest:tt)*) => {
+        decode!(@read ($($wrap)*) ($reader) $name $type $([$($count)*])?);
         decode!(@decode ($($wrap)*) ($reader) $($rest)*);
     };
 
-    // FIXME: This never matches! Why?
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident String) => {
-        $name = {
-            let _encoding = decode!(@attr_encoding $($attrs)*);
-            let _size = <decode!(@attr_size $($attrs)*)>::decode($reader)? as usize;
-            let _buffer = vec![0u8; _size];
-            if let Some(_index) = _buffer.iter().position(|_byte| *_byte == 0) {
-                _buffer.truncate(_index);
-            }
-            $($wrap)*(_encoding.parse_vec(_buffer))
-        };
-    };
-
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty) => {
+    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty) => {
         $name = $($wrap)*(<$type>::decode($reader)?);
     };
 
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:ty]) => {
+    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:ty]) => {
         $name = {
             let _count = <$count>::decode($reader)? as usize;
             let mut _items = Vec::with_capacity(_count);
-            for _ in 0..(_count) {
+            for _ in 0.._count {
                 _items.push(<$type>::decode($reader)?);
             }
             $($wrap)*(_items)
         };
     };
 
-    (@read ($($wrap:tt)*) ($reader:expr) ($($attrs:tt)*) $name:ident $type:ty [$count:expr]) => {
+    (@read ($($wrap:tt)*) ($reader:expr) $name:ident $type:ty [$count:expr]) => {
         $name = {
             let _count = $count;
             let mut _items = Vec::with_capacity(_count);
@@ -202,37 +189,5 @@ macro_rules! decode {
             }
             $($wrap)*(_items)
         };
-    };
-
-    (@attr_size size = $value:expr $(,)?) => {
-        $value
-    };
-
-    (@attr_size size = $value:expr, $($attrs:tt)*) => {
-        $value
-    };
-
-    (@attr_size $attr:ident = $value:expr, $($attrs:tt)*) => {
-        decode!(@attr_size $($attrs)*);
-    };
-
-    (@attr_size $(,)?) => {
-        u32
-    };
-
-    (@attr_encoding encoding = $value:expr $(,)?) => {
-        $value
-    };
-
-    (@attr_encoding encoding = $value:expr, $($attrs:tt)*) => {
-        $value
-    };
-
-    (@attr_encoding $attr:ident = $value:expr, $($attrs:tt)*) => {
-        decode!(@attr_encoding $($attrs)*);
-    };
-
-    (@attr_encoding $(,)?) => {
-        Encoding::UTF8
     };
 }
