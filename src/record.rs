@@ -242,7 +242,7 @@ impl Record {
         Ok(Record::v4(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
     }
 
-    pub fn write_v1(&self, writer: &mut impl Write) -> Result<u64> {
+    pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
             self.size,
@@ -251,10 +251,10 @@ impl Record {
             self.timestamp.unwrap_or(0),
             self.sha1,
         );
-        Ok(V1_RECORD_HEADER_SIZE)
+        Ok(())
     }
 
-    pub fn write_v2(&self, writer: &mut impl Write) -> Result<u64> {
+    pub fn write_v2(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
             self.size,
@@ -262,14 +262,10 @@ impl Record {
             self.compression_method,
             self.sha1,
         );
-        Ok(V2_RECORD_HEADER_SIZE)
+        Ok(())
     }
 
-    pub fn write_v3(&self, writer: &mut impl Write) -> Result<u64> {
-        let mut size: u64 = V3_RECORD_HEADER_SIZE;
-        if let Some(blocks) = &self.compression_blocks {
-            size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
-        }
+    pub fn write_v3(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
             self.size,
@@ -282,7 +278,7 @@ impl Record {
             self.encrypted as u8,
             self.compression_block_size,
         );
-        Ok(size)
+        Ok(())
     }
 }
 

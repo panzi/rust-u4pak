@@ -13,10 +13,14 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fs::File, io::{BufWriter, Write}, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{fs::File, io::{BufWriter, Write, Read}, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::OpenOptions;
 
-use crate::{Result, pak::Encoding, record::CompressionBlock, util::parse_pak_path};
+use crypto::digest::Digest;
+use crypto::sha1::{Sha1 as Sha1Hasher};
+use flate2::write::{self, ZlibEncoder};
+
+use crate::{Result, pak::{BUFFER_SIZE, Encoding}, record::CompressionBlock, util::parse_pak_path};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -104,6 +108,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             Ok(file) => file,
             Err(error) => return Err(Error::io_with_path(error, pak_path))
         };
+    let mut writer = BufWriter::new(&mut out_file);
+
+    let mut hasher = Sha1Hasher::new();
+    let mut buffer = vec![0u8; BUFFER_SIZE];
 
     let mut records = Vec::new();
     let mut data_size = 0u64;
@@ -120,12 +128,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         let compression_blocks;
         let mut compression_block_size = 0u32;
         let mut size = 0u64; // TODO
-        let mut sha1: Sha1 = [0u8; 20]; // TODO
 
         let file_path: PathBuf = filename.iter().collect();
-        let in_file = match File::open(&file_path) {
-                Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, file_path))
+        let mut in_file = match File::open(&file_path) {
+            Ok(file) => file,
+            Err(error) => return Err(Error::io_with_path(error, file_path))
         };
 
         let metadata = match in_file.metadata() {
@@ -150,11 +157,32 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             None
         };
 
+        hasher.reset();
+
         match compression_method {
             self::COMPR_NONE => {
-                // TODO
                 size = uncompressed_size;
                 compression_blocks = None;
+
+                let mut remaining = uncompressed_size as usize;
+                {
+                    // buffer might be bigger than BUFFER_SIZE if any previous
+                    // compression_block_size is bigger than BUFFER_SIZE
+                    let buffer = &mut buffer[..BUFFER_SIZE];
+                    while remaining >= BUFFER_SIZE {
+                        in_file.read_exact(buffer)?;
+                        writer.write_all(buffer)?;
+                        hasher.input(buffer);
+                        remaining -= BUFFER_SIZE;
+                    }
+                }
+
+                if remaining > 0 {
+                    let buffer = &mut buffer[..remaining];
+                    in_file.read_exact(buffer)?;
+                    writer.write_all(buffer)?;
+                    hasher.input(buffer);
+                }
             }
             self::COMPR_ZLIB => {
                 // TODO
@@ -164,7 +192,46 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     path.compression_block_size
                 };
 
+                if compression_block_size as u64 > uncompressed_size {
+                    compression_block_size = uncompressed_size as u32;
+                }
+
+                if buffer.len() < compression_block_size as usize {
+                    buffer.resize(compression_block_size as usize, 0);
+                }
+
+                let buffer = &mut buffer[..compression_block_size as usize];
                 let mut blocks = Vec::<CompressionBlock>::new();
+                let mut remaining = uncompressed_size as usize;
+                let mut start_offset = 0;
+
+                while remaining >= compression_block_size as usize {
+                    in_file.read_exact(buffer)?; // XXX: wait or is it the size of the compressed block?
+                    // TODO
+                    //writer.write_all(...)?;
+                    //hasher.input(...);
+                    remaining -= compression_block_size as usize;
+                    let end_offset = start_offset; // TODO
+                    blocks.push(CompressionBlock {
+                        start_offset,
+                        end_offset,
+                    });
+                    start_offset = end_offset;
+                }
+
+                if remaining > 0 {
+                    let buffer = &mut buffer[..remaining];
+                    in_file.read_exact(buffer)?;
+                    // TODO
+                    //writer.write_all(...)?;
+                    //hasher.input(...);
+                    let end_offset = start_offset; // TODO
+                    blocks.push(CompressionBlock {
+                        start_offset,
+                        end_offset,
+                    });
+                }
+
                 compression_blocks = Some(blocks);
             }
             _ => {
@@ -174,6 +241,9 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     with_path(pak_path))
             }
         }
+
+        let mut sha1: Sha1 = [0u8; 20];
+        hasher.result(&mut sha1);
 
         records.push(Record::new(
             make_pak_path(filename.iter()),
@@ -193,7 +263,6 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     let index_offset = data_size;
 
-    let mut writer = BufWriter::new(&mut out_file);
     let mut index_size = 0u64;
 
     let mount_pount = if let Some(mount_point) = options.mount_point {
@@ -202,25 +271,43 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         ""
     };
 
-    index_size += write_path(&mut writer, mount_pount, options.encoding)?;
+    buffer.clear();
+    write_path(&mut buffer, mount_pount, options.encoding)?;
+    writer.write_all(&buffer)?;
+    index_size += buffer.len() as u64;
 
     match options.version {
         1 => {
             for record in &records {
-                index_size += write_path(&mut writer, record.filename(), options.encoding)?;
-                index_size += record.write_v1(&mut writer)?; // TODO: index_sha1
+                buffer.clear();
+                write_path(&mut buffer, record.filename(), options.encoding)?;
+                record.write_v1(&mut buffer)?;
+
+                writer.write_all(&buffer)?;
+                hasher.input(&buffer);
+                index_size += buffer.len() as u64;
             }
         }
         2 => {
             for record in &records {
-                index_size += write_path(&mut writer, record.filename(), options.encoding)?;
-                index_size += record.write_v2(&mut writer)?; // TODO: index_sha1
+                buffer.clear();
+                write_path(&mut buffer, record.filename(), options.encoding)?;
+                record.write_v2(&mut buffer)?;
+
+                writer.write_all(&buffer)?;
+                hasher.input(&buffer);
+                index_size += buffer.len() as u64;
             }
         }
         3 => {
             for record in &records {
-                index_size += write_path(&mut writer, record.filename(), options.encoding)?;
-                index_size += record.write_v3(&mut writer)?; // TODO: index_sha1
+                buffer.clear();
+                write_path(&mut buffer, record.filename(), options.encoding)?;
+                record.write_v3(&mut buffer)?;
+
+                writer.write_all(&buffer)?;
+                hasher.input(&buffer);
+                index_size += buffer.len() as u64;
             }
         }
         _ => {
@@ -230,7 +317,8 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         }
     }
 
-    let index_sha1: Sha1 = [0u8; 20]; // TODO
+    let mut index_sha1: Sha1 = [0u8; 20];
+    hasher.result(&mut index_sha1);
 
     encode!(&mut writer,
         PAK_MAGIC,
@@ -254,14 +342,12 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     ))
 }
 
-pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Result<u64> {
-    let mut size = 4u64;
+pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Result<()> {
     match encoding {
         Encoding::UTF8 => {
             let bytes = path.as_bytes();
             writer.write_all(&bytes.len().to_le_bytes())?;
 
-            size += bytes.len() as u64;
             writer.write_all(bytes)?;
         }
         Encoding::ASCII => {
@@ -275,8 +361,6 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
                 }
             }
             writer.write_all(&bytes.len().to_le_bytes())?;
-
-            size += bytes.len() as u64;
             writer.write_all(bytes)?;
         }
         Encoding::Latin1 => {
@@ -292,10 +376,8 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
             let bytes: Vec<_> = path.chars().map(|ch| ch as u8).collect();
 
             writer.write_all(&bytes.len().to_le_bytes())?;
-
-            size += bytes.len() as u64;
             writer.write_all(&bytes)?;
         }
     }
-    Ok(size)
+    Ok(())
 }

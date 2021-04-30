@@ -42,7 +42,7 @@ pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, size:
     use crate::pak::BUFFER_SIZE;
 
     // needs to be heap allocated since Windows has small stack sizes
-    let mut buf = vec![0u8; BUFFER_SIZE];
+    let mut buf = vec![0u8; std::cmp::min(BUFFER_SIZE, size)];
 
     let mut remaining = size;
     while remaining >= BUFFER_SIZE {
