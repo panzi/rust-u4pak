@@ -160,4 +160,10 @@ impl From<std::num::ParseIntError> for Error {
     }
 }
 
+impl From<std::time::SystemTimeError> for Error {
+    fn from(error: std::time::SystemTimeError) -> Self {
+        Error::new(error.to_string())
+    }
+}
+
 pub type Result<T> = core::result::Result<T, Error>;

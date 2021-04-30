@@ -36,6 +36,12 @@ pub const COMPR_ZLIB       : u32 = 0x01;
 pub const COMPR_BIAS_MEMORY: u32 = 0x10;
 pub const COMPR_BIAS_SPEED : u32 = 0x20;
 
+pub const V1_RECORD_HEADER_SIZE: u64 = 56;
+pub const V2_RECORD_HEADER_SIZE: u64 = 48;
+pub const V3_RECORD_HEADER_SIZE: u64 = 53;
+pub const V4_RECORD_HEADER_SIZE: u64 = 57;
+pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
+
 pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
 
 pub type Sha1 = [u8; 20];
@@ -139,7 +145,6 @@ pub struct Pak {
     version: u32,
     index_offset: u64,
     index_size: u64,
-    footer_offset: u64,
     index_sha1: Sha1,
     mount_point: Option<String>,
     records: Vec<Record>,
@@ -176,6 +181,25 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
 }
 
 impl Pak {
+    #[inline]
+    pub(crate) fn new(
+        version: u32,
+        index_offset: u64,
+        index_size: u64,
+        index_sha1: Sha1,
+        mount_point: Option<String>,
+        records: Vec<Record>,
+    ) -> Self {
+        Self {
+            version,
+            index_offset,
+            index_size,
+            index_sha1,
+            mount_point,
+            records,
+        }
+    }
+
     pub fn from_path(path: impl AsRef<Path>, options: Options) -> Result<Pak> {
         match File::open(&path) {
             Ok(mut file) => match Self::from_file(&mut file, options) {
@@ -256,7 +280,6 @@ impl Pak {
             version,
             index_offset,
             index_size,
-            footer_offset,
             index_sha1,
             mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
             records,
@@ -364,11 +387,6 @@ impl Pak {
     }
 
     #[inline]
-    pub fn footer_offset(&self) -> u64 {
-        self.footer_offset
-    }
-
-    #[inline]
     pub fn index_sha1(&self) -> &Sha1 {
         &self.index_sha1
     }
@@ -391,33 +409,33 @@ impl Pak {
         self.records
     }
 
-    pub fn header_size(&self, record: &Record) -> u64 {
-        match self.version {
-            1 => 56,
-            2 => 48,
+    pub fn header_size(version: u32, record: &Record) -> u64 {
+        match version {
+            1 => V1_RECORD_HEADER_SIZE,
+            2 => V2_RECORD_HEADER_SIZE,
             3 => {
-                let mut size: u64 = 53;
+                let mut size: u64 = V3_RECORD_HEADER_SIZE;
                 if let Some(blocks) = &record.compression_blocks() {
-                    size += blocks.len() as u64 * 16;
+                    size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
                 }
                 size
             }
             4 => {
-                let mut size: u64 = 57;
+                let mut size: u64 = V4_RECORD_HEADER_SIZE;
                 if let Some(blocks) = &record.compression_blocks() {
-                    size += blocks.len() as u64 * 16;
+                    size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
                 }
                 size
             }
             _ => {
-                panic!("unsupported version: {}", self.version)
+                panic!("unsupported version: {}", version)
             }
         }
     }
 
     #[inline]
     pub fn data_offset(&self, record: &Record) -> u64 {
-        self.header_size(record) + record.offset()
+        Self::header_size(self.version, record) + record.offset()
     }
 
     pub fn unpack(&self, record: &Record, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<()> {

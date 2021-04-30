@@ -37,8 +37,8 @@ pub mod list;
 pub use list::{list, ListOptions, ListStyle};
 
 pub mod util;
-
 pub mod decode;
+pub mod encode;
 
 pub mod filter;
 pub use filter::Filter;

@@ -15,9 +15,11 @@
 
 use std::io::{Read, Write};
 
-use crate::pak::{Sha1, COMPR_NONE};
+use crate::pak::{COMPRESSION_BLOCK_HEADER_SIZE, COMPR_NONE, Sha1, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE};
 use crate::decode;
 use crate::decode::Decode;
+use crate::encode;
+use crate::encode::Encode;
 use crate::Result;
 
 #[derive(Debug)]
@@ -41,6 +43,33 @@ pub struct CompressionBlock {
 }
 
 impl Record {
+    #[inline]
+    pub(crate) fn new(
+        filename: String,
+        offset: u64,
+        size: u64,
+        uncompressed_size: u64,
+        compression_method: u32,
+        timestamp: Option<u64>,
+        sha1: Sha1,
+        compression_blocks: Option<Vec<CompressionBlock>>,
+        encrypted: bool,
+        compression_block_size: u32,
+    ) -> Self {
+        Self {
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            timestamp,
+            sha1,
+            compression_blocks,
+            encrypted,
+            compression_block_size,
+        }
+    }
+
     pub fn v1(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, timestamp: u64, sha1: Sha1) -> Self {
         Self {
             filename,
@@ -213,9 +242,47 @@ impl Record {
         Ok(Record::v4(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
     }
 
-    pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {
-        
-        Ok(())
+    pub fn write_v1(&self, writer: &mut impl Write) -> Result<u64> {
+        encode!(writer,
+            self.offset,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.timestamp.unwrap_or(0),
+            self.sha1,
+        );
+        Ok(V1_RECORD_HEADER_SIZE)
+    }
+
+    pub fn write_v2(&self, writer: &mut impl Write) -> Result<u64> {
+        encode!(writer,
+            self.offset,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+        );
+        Ok(V2_RECORD_HEADER_SIZE)
+    }
+
+    pub fn write_v3(&self, writer: &mut impl Write) -> Result<u64> {
+        let mut size: u64 = V3_RECORD_HEADER_SIZE;
+        if let Some(blocks) = &self.compression_blocks {
+            size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
+        }
+        encode!(writer,
+            self.offset,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+            if let Some(blocks) = &self.compression_blocks {
+                blocks [u32],
+            }
+            self.encrypted as u8,
+            self.compression_block_size,
+        );
+        Ok(size)
     }
 }
 
