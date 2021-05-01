@@ -17,8 +17,23 @@ use std::path::Path;
 use std::fs::File;
 
 use crate::Result;
+use crate::Record;
 use crate::Pak;
 use crate::Filter;
+
+#[inline]
+fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
+    for record in records_iter {
+        match pak.unpack(record, in_file, outdir) {
+            Ok(()) => {},
+            Err(error) => {
+                return Err(error.with_path_if_none(record.filename()));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, filter: &Option<Filter<'a>>) -> Result<()> {
     let outdir = outdir.as_ref();
@@ -28,13 +43,9 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, filte
             .iter()
             .filter(|record| filter.contains(record.filename()));
 
-        for record in records {
-            pak.unpack(record, in_file, outdir)?;
-        }
+        unpack_iter(pak, in_file, outdir, records)?;
     } else {
-        for record in pak.records() {
-            pak.unpack(record, in_file, outdir)?;
-        }
+        unpack_iter(pak, in_file, outdir, pak.records().iter())?;
     }
     Ok(())
 }

@@ -166,4 +166,10 @@ impl From<std::time::SystemTimeError> for Error {
     }
 }
 
+impl From<flate2::DecompressError> for Error {
+    fn from(error: flate2::DecompressError) -> Self {
+        Error::new(error.to_string())
+    }
+}
+
 pub type Result<T> = core::result::Result<T, Error>;

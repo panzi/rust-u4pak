@@ -356,7 +356,7 @@ impl Pak {
                 )).with_path(record.filename()));
             }
 
-            let offset = self.data_offset(record);
+            let offset = record.offset() + Self::header_size(self.version, record);
             if offset + record.size() > self.index_offset {
                 check_error!(error_count, abort_on_error, null_separator, Error::new(
                     "data bleeds into index".to_string()
@@ -413,7 +413,7 @@ impl Pak {
         match version {
             1 => V1_RECORD_HEADER_SIZE,
             2 => V2_RECORD_HEADER_SIZE,
-            3 => {
+            3 | 7 => {
                 let mut size: u64 = V3_RECORD_HEADER_SIZE;
                 if let Some(blocks) = &record.compression_blocks() {
                     size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
@@ -431,11 +431,6 @@ impl Pak {
                 panic!("unsupported version: {}", version)
             }
         }
-    }
-
-    #[inline]
-    pub fn data_offset(&self, record: &Record) -> u64 {
-        Self::header_size(self.version, record) + record.offset()
     }
 
     pub fn unpack(&self, record: &Record, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<()> {
@@ -467,18 +462,18 @@ impl Pak {
 
         match record.compression_method() {
             self::COMPR_NONE => {
-                in_file.seek(SeekFrom::Start(self.data_offset(record)))?;
+                in_file.seek(SeekFrom::Start(record.offset() + Self::header_size(self.version, record)))?;
                 transfer(in_file, &mut out_file, record.size() as usize)?;
             }
             self::COMPR_ZLIB => {
                 if let Some(blocks) = record.compression_blocks() {
-                    let base_offset = self.data_offset(record);
+                    let base_offset = record.offset();
 
                     let mut in_file = BufReader::new(in_file);
                     let mut out_file = BufWriter::new(out_file);
 
-                    let mut in_buffer = vec![0u8; record.compression_block_size() as usize];
-                    let mut out_buffer = Vec::new();
+                    let mut in_buffer = Vec::new();
+                    let mut out_buffer = Vec::with_capacity(record.compression_block_size() as usize);
 
                     for block in blocks {
                         let block_size = block.end_offset - block.start_offset;

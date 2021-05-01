@@ -61,7 +61,6 @@ impl<'a> PackPath<'a> {
             filename,
         })
     }
-
 }
 
 pub struct PackOptions<'a> {

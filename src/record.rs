@@ -15,7 +15,7 @@
 
 use std::io::{Read, Write};
 
-use crate::pak::{COMPRESSION_BLOCK_HEADER_SIZE, COMPR_NONE, Sha1, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE};
+use crate::pak::{COMPR_NONE, Sha1};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
