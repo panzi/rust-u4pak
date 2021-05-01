@@ -56,18 +56,24 @@ impl Align {
 }
 
 pub fn print_row(row: &[impl AsRef<str>], lens: &[usize], align: &[Align]) {
-    let mut first = true;
-    for ((cell, len), align) in row.iter().zip(lens.iter()).zip(align.iter()) {
-        if first {
-            first = false;
-        } else {
-            print!("  "); // cell spacing
-        }
+    let cell_count = row.len();
+    if cell_count > 0 {
+        let mut first = true;
+        let last_index = cell_count - 1;
+        for (index, ((cell, len), align)) in row.iter().zip(lens.iter()).zip(align.iter()).enumerate() {
+            if first {
+                first = false;
+            } else {
+                print!("  "); // cell spacing
+            }
 
-        if align.is_right() {
-            print!("{:>1$}", cell.as_ref(), *len);
-        } else {
-            print!("{:<1$}", cell.as_ref(), *len);
+            if index == last_index {
+                print!("{}", cell.as_ref());
+            } else if align.is_right() {
+                print!("{:>1$}", cell.as_ref(), *len);
+            } else {
+                print!("{:<1$}", cell.as_ref(), *len);
+            }
         }
     }
 
