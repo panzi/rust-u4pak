@@ -40,6 +40,7 @@ pub const V1_RECORD_HEADER_SIZE: u64 = 56;
 pub const V2_RECORD_HEADER_SIZE: u64 = 48;
 pub const V3_RECORD_HEADER_SIZE: u64 = 53;
 pub const V4_RECORD_HEADER_SIZE: u64 = 57;
+pub const V7_RECORD_HEADER_SIZE: u64 = V3_RECORD_HEADER_SIZE;
 pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
 
 pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
@@ -486,6 +487,17 @@ impl Pak {
                         zlib.read_to_end(&mut out_buffer)?;
                         out_file.write_all(&out_buffer)?;
                     }
+                } else {
+                    // version 2 has compression support, but not compression blocks
+                    in_file.seek(SeekFrom::Start(record.offset() + Self::header_size(self.version, record)))?;
+
+                    let mut in_buffer = vec![0u8; record.size() as usize];
+                    let mut out_buffer = Vec::new();
+                    in_file.read_exact(&mut in_buffer)?;
+
+                    let mut zlib = ZlibDecoder::new(&in_buffer[..]);
+                    zlib.read_to_end(&mut out_buffer)?;
+                    out_file.write_all(&out_buffer)?;
                 }
             }
             _ => {
