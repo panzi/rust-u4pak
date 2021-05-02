@@ -1,5 +1,6 @@
 use std::{fs::DirEntry, path::Path};
 
+#[derive(Debug)]
 pub struct WalkDir {
     stack: Vec<std::fs::ReadDir>,
     follow_links: bool,

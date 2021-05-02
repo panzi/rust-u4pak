@@ -27,12 +27,15 @@ pub enum SortKey {
     ComprMethod,
     UncomprSize,
     ComprBlockSize,
+    Timestamp,
+
     RevName,
     RevOffset,
     RevSize,
     RevComprMethod,
     RevUncomprSize,
     RevComprBlockSize,
+    RevTimestamp,
 }
 
 pub type Order = [SortKey];
@@ -56,6 +59,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::UncomprSize)
         } else if value.eq_ignore_ascii_case("compression-block-size") {
             Ok(SortKey::ComprBlockSize)
+        } else if value.eq_ignore_ascii_case("timestamp") {
+            Ok(SortKey::Timestamp)
         } else if value.eq_ignore_ascii_case("-name") {
             Ok(SortKey::RevName)
         } else if value.eq_ignore_ascii_case("-size") || value.eq_ignore_ascii_case("-compressed-size") {
@@ -68,6 +73,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::RevUncomprSize)
         } else if value.eq_ignore_ascii_case("-compression-block-size") {
             Ok(SortKey::RevComprBlockSize)
+        } else if value.eq_ignore_ascii_case("-timestamp") {
+            Ok(SortKey::RevTimestamp)
         } else {
             Err(Error::new(format!("illegal argument --sort={:?}", value)))
         }
@@ -84,6 +91,7 @@ impl SortKey {
             SortKey::ComprMethod       => |a: &Record, b: &Record| a.compression_method().cmp(&b.compression_method()),
             SortKey::UncomprSize       => |a: &Record, b: &Record| a.uncompressed_size().cmp(&b.uncompressed_size()),
             SortKey::ComprBlockSize    => |a: &Record, b: &Record| a.compression_block_size().cmp(&b.compression_block_size()),
+            SortKey::Timestamp         => |a: &Record, b: &Record| a.timestamp().cmp(&b.timestamp()),
 
             SortKey::RevName           => |a: &Record, b: &Record| b.filename().cmp(&a.filename()),
             SortKey::RevSize           => |a: &Record, b: &Record| b.size().cmp(&a.size()),
@@ -91,6 +99,7 @@ impl SortKey {
             SortKey::RevComprMethod    => |a: &Record, b: &Record| b.compression_method().cmp(&a.compression_method()),
             SortKey::RevUncomprSize    => |a: &Record, b: &Record| b.uncompressed_size().cmp(&a.uncompressed_size()),
             SortKey::RevComprBlockSize => |a: &Record, b: &Record| b.compression_block_size().cmp(&a.compression_block_size()),
+            SortKey::RevTimestamp      => |a: &Record, b: &Record| b.timestamp().cmp(&a.timestamp()),
         }
     }
 }

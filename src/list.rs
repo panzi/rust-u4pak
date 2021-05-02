@@ -15,6 +15,8 @@
 
 use std::io::Write;
 
+use chrono::NaiveDateTime;
+
 use crate::sort::{sort, Order};
 use crate::util::{format_size, print_table, Align::*};
 use crate::result::Result;
@@ -59,6 +61,7 @@ impl Default for ListOptions<'_> {
 }
 
 pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
+    let version = pak.version();
     match (options.order, &options.filter) {
         (Some(order), Some(filter)) => {
             let mut records = pak.records()
@@ -67,13 +70,13 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
                 .collect();
 
             sort(&mut records, order);
-            list_records(&records, options)
+            list_records(version, &records, options)
         }
         (Some(order), None) => {
             let mut records = pak.into_records();
 
             sort(&mut records, order);
-            list_records(&records, options)
+            list_records(version, &records, options)
         }
         (None, Some(filter)) => {
             let records = pak.records()
@@ -81,15 +84,15 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
                 .filter(|record| filter.contains(record.filename()))
                 .collect::<Vec<_>>();
 
-            list_records(&records, options)
+            list_records(version, &records, options)
         }
         (None, None) => {
-            list_records(pak.records(), options)
+            list_records(version, pak.records(), options)
         }
     }
 }
 
-pub fn list_records(records: &[impl AsRef<Record>], options: ListOptions) -> Result<()> {
+fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptions) -> Result<()> {
     match options.style {
         ListStyle::Table { human_readable } => {
             let mut table: Vec<Vec<String>> = Vec::new();
@@ -102,21 +105,40 @@ pub fn list_records(records: &[impl AsRef<Record>], options: ListOptions) -> Res
 
             for record in records {
                 let record = record.as_ref();
-                table.push(vec![
+                let mut row = vec![
                     format!("{}", record.offset()),
                     fmt_size(record.uncompressed_size()),
                     compression_method_name(record.compression_method()).to_owned(),
                     fmt_size(record.compression_block_size() as u64),
                     fmt_size(record.size()),
-                    HexDisplay::new(record.sha1()).to_string(),
-                    record.filename().to_owned(),
-                ]);
+                ];
+                if version == 1 {
+                    if let Some(timestamp) = record.timestamp() {
+                        if let Some(timestamp) = NaiveDateTime::from_timestamp_opt(timestamp as i64, 0) {
+                            row.push(timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
+                        } else {
+                            row.push("-".to_string());
+                        }
+                    } else {
+                        row.push("-".to_string());
+                    }
+                }
+                row.push(HexDisplay::new(record.sha1()).to_string());
+                row.push(record.filename().to_owned());
+                table.push(row);
             }
 
-            print_table(
-                &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "SHA1", "Filename"],
-                 &[Right,    Right,  Left,           Right,              Right,        Right,  Left],
-                &table);
+            if version == 1 {
+                print_table(
+                    &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "Timestamp", "SHA1", "Filename"],
+                    &[Right,    Right,  Left,           Right,              Right,        Left,        Left,  Left],
+                    &table);
+            } else {
+                print_table(
+                    &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "SHA1", "Filename"],
+                    &[Right,    Right,  Left,           Right,              Right,        Left,  Left],
+                    &table);
+            }
         }
         ListStyle::OnlyNames { null_separated } => {
             let sep = [if null_separated { 0 } else { '\n' as u8 }];
