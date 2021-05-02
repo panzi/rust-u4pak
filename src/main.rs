@@ -50,6 +50,8 @@ pub use unpack::unpack;
 pub mod pack;
 pub use pack::{pack, PackOptions};
 
+pub mod walkdir;
+
 use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}};
 
 pub mod io;

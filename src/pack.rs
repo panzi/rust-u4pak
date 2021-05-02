@@ -36,6 +36,7 @@ pub struct PackPath<'a> {
     pub compression_block_size: Option<NonZeroU32>,
     pub compression_level: Option<NonZeroU32>,
     pub filename: &'a str,
+    pub rename: Option<&'a str>,
 }
 
 impl<'a> PackPath<'a> {
@@ -45,6 +46,7 @@ impl<'a> PackPath<'a> {
             compression_block_size: None,
             compression_level: None,
             filename,
+            rename: None,
         }
     }
 
@@ -62,6 +64,7 @@ impl<'a> PackPath<'a> {
             compression_block_size,
             compression_level,
             filename,
+            rename: None,
         })
     }
 }
@@ -70,7 +73,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
     type Error = crate::result::Error;
 
     fn try_from(filename: &'a str) -> std::result::Result<Self, Self::Error> {
-        // :zlib,level=5,block_size=512:foo/bar
+        // :zlib,level=5,block_size=512,rename=egg/spam.txt:/foo/bar/baz.txt
         if filename.starts_with(':') {
             if let Some(index) = filename.find(':') {
                 let (param_str, filename) = filename.split_at(index + 1);
@@ -79,6 +82,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                 let mut compression_method = COMPR_DEFAULT;
                 let mut compression_block_size = None;
                 let mut compression_level = None;
+                let mut rename = None;
 
                 for param in param_str.split(',') {
                     if param.eq_ignore_ascii_case("zlib") {
@@ -98,17 +102,22 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                                         compression_block_size = NonZeroU32::new(block_size);
                                     }
                                     _ => {
-                                        return Err(Error::new(format!("illegal path specification, illegal parameter value {:?} in: {:?}",
+                                        return Err(Error::new(format!(
+                                            "illegal path specification, illegal parameter value {:?} in: {:?}",
                                             param, filename)));
                                     }
                                 }
                             }
+                        } else if key.eq_ignore_ascii_case("rename") {
+                            rename = Some(value);
                         } else {
-                            return Err(Error::new(format!("illegal path specification, unhandeled parameter {:?} in: {:?}",
+                            return Err(Error::new(format!(
+                                "illegal path specification, unhandeled parameter {:?} in: {:?}",
                                 param, filename)));
                         }
                     } else {
-                        return Err(Error::new(format!("illegal path specification, unhandeled parameter {:?} in: {:?}",
+                        return Err(Error::new(format!(
+                            "illegal path specification, unhandeled parameter {:?} in: {:?}",
                             param, filename)));
                     }
                 }
@@ -118,9 +127,12 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                     compression_level,
                     compression_method,
                     filename,
+                    rename,
                 });
             } else {
-                return Err(Error::new(format!("illegal path specification, expected a second ':' in: {:?}", filename)));
+                return Err(Error::new(format!(
+                    "illegal path specification, expected a second ':' in: {:?}",
+                    filename)));
             }
         } else {
             return Ok(Self::new(filename));
@@ -208,16 +220,38 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         };
 
         if options.version < 2 && compression_method != COMPR_NONE {
-            return Err(Error::new(format!("Compression is only supported startig version 2"))
+            return Err(Error::new("Compression is only supported startig with version 2".to_string())
                 .with_path(path.filename));
         }
 
-        let filename = parse_pak_path(path.filename).collect::<Vec<_>>();
+        let source_path: PathBuf;
+        let filename = if let Some(filename) = path.rename {
+            source_path = path.filename.into();
+            parse_pak_path(filename).collect::<Vec<_>>()
+        } else {
+            #[cfg(target_os = "windows")]
+            let filename = path.filename
+                .trim_end_matches(|ch| ch == '/' || ch == '\\')
+                .split(|ch| ch == '/' || ch == '\\')
+                .collect::<Vec<_>>();
+
+            #[cfg(not(target_os = "windows"))]
+            let filename = path.filename
+                .trim_end_matches('/')
+                .split('/')
+                .collect::<Vec<_>>();
+
+            source_path = filename.iter().collect();
+            filename
+        };
+
+
+        let file_path = source_path; // TODO: walk dir
+
         let compression_blocks;
         let mut compression_block_size = 0u32;
         let mut size = 0u64;
 
-        let file_path: PathBuf = filename.iter().collect();
         let mut in_file = match File::open(&file_path) {
             Ok(file) => file,
             Err(error) => return Err(Error::io_with_path(error, file_path))
@@ -376,7 +410,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         hasher.result(&mut sha1);
 
         records.push(Record::new(
-            make_pak_path(filename.iter()),
+            make_pak_path(filename.iter()), // TODO
             offset,
             size,
             uncompressed_size,
