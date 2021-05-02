@@ -14,7 +14,8 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use clap::{Arg, App, SubCommand};
-use std::convert::TryInto;
+use pak::COMPR_NONE;
+use std::{convert::TryInto, num::NonZeroU32};
 use std::io::BufReader;
 use std::fs::File;
 
@@ -47,7 +48,9 @@ pub mod unpack;
 pub use unpack::unpack;
 
 pub mod pack;
-pub use pack::pack;
+pub use pack::{pack, PackOptions};
+
+use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}};
 
 pub mod io;
 
@@ -60,6 +63,41 @@ fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
         }
     } else {
         None
+    }
+}
+
+pub fn parse_compression_method(value: &str) -> Result<u32> {
+    if value.eq_ignore_ascii_case("node") {
+        Ok(COMPR_NONE)
+    } else if value.eq_ignore_ascii_case("zlib") {
+        Ok(COMPR_ZLIB)
+    } else {
+        Err(Error::new(format!("compression method not supported: {:?}", value)))
+    }
+}
+
+pub const COMPR_LEVEL_FAST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+pub const COMPR_LEVEL_DEFAULT: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
+pub const COMPR_LEVEL_BEST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(9) };
+
+pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
+    if value.eq_ignore_ascii_case("best") {
+        Ok(COMPR_LEVEL_BEST)
+    } else if value.eq_ignore_ascii_case("fast") {
+        Ok(COMPR_LEVEL_FAST)
+    } else if value.eq_ignore_ascii_case("default") {
+        Ok(COMPR_LEVEL_DEFAULT)
+    } else {
+        match value.parse() {
+            Ok(level) if level > 0 && level < 10 => {
+                Ok(NonZeroU32::new(level).unwrap())
+            }
+            _ => {
+                return Err(Error::new(format!(
+                    "illegal compression level: {:?}",
+                    value)));
+            }
+        }
     }
 }
 
@@ -140,6 +178,8 @@ fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
 }
 
 fn run() -> Result<()> {
+    let default_block_size_str = format!("{}", DEFAULT_BLOCK_SIZE);
+
     let app = App::new("VPK - Valve Packages")
         .version("1.0.0")
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
@@ -227,6 +267,25 @@ fn run() -> Result<()> {
                 .takes_value(true)
                 .default_value("3")
                 .help("Create package of given VERSION. Supported versions are: 1, 2, and 3"))
+            .arg(Arg::with_name("mount-point")
+                .long("mount-point")
+                .short("m")
+                .takes_value(true))
+            .arg(Arg::with_name("compression-method")
+                .long("compression-method")
+                .short("c")
+                .takes_value(true)
+                .default_value("none"))
+            .arg(Arg::with_name("compression-block-size")
+                .long("compression-block-size")
+                .short("b")
+                .takes_value(true)
+                .default_value(&default_block_size_str))
+            .arg(Arg::with_name("compression-level")
+                .long("compression-level")
+                .short("l")
+                .takes_value(true)
+                .default_value("default"))
             .arg(arg_encoding())
             .arg(arg_package())
             .arg(Arg::with_name("paths")
@@ -425,7 +484,35 @@ fn run() -> Result<()> {
 
             unpack(&pak, &mut file, outdir, &filter)?;
         }
-        ("pack", Some(_args)) => {
+        ("pack", Some(args)) => {
+            let mount_point = args.value_of("mount-point");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let version = args.value_of("version").unwrap().parse()?;
+            let compression_block_size = args.value_of("compression-block-size").unwrap().parse()?;
+            let compression_method = parse_compression_method(args.value_of("compression-method").unwrap())?;
+            let compression_level = parse_compression_level(args.value_of("compression-level").unwrap())?;
+            let path = args.value_of("package").unwrap();
+            let paths = if let Some(path_strs) = args.values_of("paths") {
+                let mut paths = Vec::<PackPath>::new();
+
+                for path in path_strs {
+                    paths.push(path.try_into()?);
+                }
+
+                paths
+            } else {
+                return Err(Error::new("missing argument: PATH".to_string()));
+            };
+
+            pack(path, &paths, PackOptions {
+                version,
+                mount_point,
+                encoding,
+                compression_method,
+                compression_block_size,
+                compression_level,
+            })?;
+
             panic!("pack is not implemented yet");
         }
         #[cfg(target_os = "linux")]

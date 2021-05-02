@@ -13,14 +13,14 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fs::File, io::{BufWriter, Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{convert::TryFrom, fs::File, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::OpenOptions;
 
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
 use flate2::{Compression, write::ZlibEncoder};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, V4_RECORD_HEADER_SIZE, V7_RECORD_HEADER_SIZE}, record::CompressionBlock, util::parse_pak_path};
+use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::parse_pak_path};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -33,7 +33,8 @@ pub const COMPR_DEFAULT: u32 = u32::MAX;
 
 pub struct PackPath<'a> {
     pub compression_method: u32,
-    pub compression_block_size: u32,
+    pub compression_block_size: Option<NonZeroU32>,
+    pub compression_level: Option<NonZeroU32>,
     pub filename: &'a str,
 }
 
@@ -41,12 +42,13 @@ impl<'a> PackPath<'a> {
     pub fn new(filename: &'a str) -> Self {
         Self {
             compression_method: COMPR_DEFAULT,
-            compression_block_size: 0,
+            compression_block_size: None,
+            compression_level: None,
             filename,
         }
     }
 
-    pub fn compressed(filename: &'a str, compression_method: u32, compression_block_size: u32) -> Result<Self> {
+    pub fn compressed(filename: &'a str, compression_method: u32, compression_block_size: Option<NonZeroU32>, compression_level: Option<NonZeroU32>) -> Result<Self> {
         match compression_method {
             self::COMPR_NONE | self::COMPR_ZLIB | self::COMPR_DEFAULT => {}
             _ => return Err(Error::new(
@@ -58,16 +60,81 @@ impl<'a> PackPath<'a> {
         Ok(Self {
             compression_method,
             compression_block_size,
+            compression_level,
             filename,
         })
     }
 }
 
+impl<'a> TryFrom<&'a str> for PackPath<'a> {
+    type Error = crate::result::Error;
+
+    fn try_from(filename: &'a str) -> std::result::Result<Self, Self::Error> {
+        // :zlib,level=5,block_size=512:foo/bar
+        if filename.starts_with(':') {
+            if let Some(index) = filename.find(':') {
+                let (param_str, filename) = filename.split_at(index + 1);
+                let param_str = &param_str[1..param_str.len() - 1];
+
+                let mut compression_method = COMPR_DEFAULT;
+                let mut compression_block_size = None;
+                let mut compression_level = None;
+
+                for param in param_str.split(',') {
+                    if param.eq_ignore_ascii_case("zlib") {
+                        compression_method = COMPR_ZLIB;
+                    } else if let Some(index) = param.find('=') {
+                        let (key, value) = param.split_at(index + 1);
+                        let key = &key[..key.len() - 1];
+
+                        if key.eq_ignore_ascii_case("level") {
+                            compression_level = Some(parse_compression_level(value)?);
+                        } else if key.eq_ignore_ascii_case("block_size") {
+                            if value.eq_ignore_ascii_case("default") {
+                                compression_block_size = Some(DEFAULT_BLOCK_SIZE);
+                            } else {
+                                match value.parse() {
+                                    Ok(block_size) if block_size > 0 => {
+                                        compression_block_size = NonZeroU32::new(block_size);
+                                    }
+                                    _ => {
+                                        return Err(Error::new(format!("illegal path specification, illegal parameter value {:?} in: {:?}",
+                                            param, filename)));
+                                    }
+                                }
+                            }
+                        } else {
+                            return Err(Error::new(format!("illegal path specification, unhandeled parameter {:?} in: {:?}",
+                                param, filename)));
+                        }
+                    } else {
+                        return Err(Error::new(format!("illegal path specification, unhandeled parameter {:?} in: {:?}",
+                            param, filename)));
+                    }
+                }
+
+                return Ok(Self {
+                    compression_block_size,
+                    compression_level,
+                    compression_method,
+                    filename,
+                });
+            } else {
+                return Err(Error::new(format!("illegal path specification, expected a second ':' in: {:?}", filename)));
+            }
+        } else {
+            return Ok(Self::new(filename));
+        }
+    }
+}
+
+
 pub struct PackOptions<'a> {
     pub version: u32,
     pub mount_point: Option<&'a str>,
     pub compression_method: u32,
-    pub compression_block_size: u32,
+    pub compression_block_size: NonZeroU32,
+    pub compression_level: NonZeroU32,
     pub encoding: Encoding,
 }
 
@@ -78,6 +145,7 @@ impl Default for PackOptions<'_> {
             mount_point: None,
             compression_method: COMPR_NONE,
             compression_block_size: DEFAULT_BLOCK_SIZE,
+            compression_level: DEFAULT_COMPRESSION_LEVEL,
             encoding: Encoding::default(),
         }
     }
@@ -95,8 +163,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         }
     };
 
-    // TODO: parameter:
-    let compression_level = Compression::default();
+    let compression_level = Compression::new(options.compression_level.get());
 
     match options.compression_method {
         self::COMPR_NONE | self::COMPR_ZLIB => {}
@@ -127,8 +194,6 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         1 => V1_RECORD_HEADER_SIZE,
         2 => V2_RECORD_HEADER_SIZE,
         3 => V3_RECORD_HEADER_SIZE,
-        4 => V4_RECORD_HEADER_SIZE,
-        7 => V7_RECORD_HEADER_SIZE,
         _ => {
             panic!("unsupported version: {}", options.version)
         }
@@ -210,6 +275,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                 }
             }
             self::COMPR_ZLIB => {
+                let compression_level = if let Some(compression_level) = path.compression_level {
+                    Compression::new(compression_level.get())
+                } else {
+                    compression_level
+                };
                 if options.version <= 2 {
                     buffer.resize(uncompressed_size as usize, 0);
                     in_file.read_exact(&mut buffer)?;
@@ -225,11 +295,9 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
                     compression_blocks = None;
                 } else {
-                    compression_block_size = if path.compression_block_size == 0 {
-                        options.compression_block_size
-                    } else {
-                        path.compression_block_size
-                    };
+                    compression_block_size = path.compression_block_size
+                        .unwrap_or(options.compression_block_size)
+                        .get();
 
                     if compression_block_size as u64 > uncompressed_size {
                         compression_block_size = uncompressed_size as u32;

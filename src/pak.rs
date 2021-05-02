@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{convert::TryFrom, fmt::Display, io::{BufWriter, Write}, path::Path};
+use std::{convert::TryFrom, fmt::Display, io::{BufWriter, Write}, num::NonZeroU32, path::Path};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, BufReader};
 
@@ -29,11 +29,12 @@ pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
 
-pub const DEFAULT_BLOCK_SIZE: u32 = 64 * 1024;
+pub const DEFAULT_BLOCK_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(64 * 1024) };
+pub const DEFAULT_COMPRESSION_LEVEL: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
 
 pub const COMPR_NONE       : u32 = 0x00;
 pub const COMPR_ZLIB       : u32 = 0x01;
-pub const COMPR_BIAS_MEMORY: u32 = 0x10;
+pub const COMPR_BIAS_MEMORY: u32 = 0x10; // I'm not sure, maybe these are just flags for zlib?
 pub const COMPR_BIAS_SPEED : u32 = 0x20;
 
 pub const V1_RECORD_HEADER_SIZE: u64 = 56;
