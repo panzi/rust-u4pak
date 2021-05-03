@@ -40,8 +40,6 @@ pub const COMPR_BIAS_SPEED : u32 = 0x20;
 pub const V1_RECORD_HEADER_SIZE: u64 = 56;
 pub const V2_RECORD_HEADER_SIZE: u64 = 48;
 pub const V3_RECORD_HEADER_SIZE: u64 = 53;
-pub const V4_RECORD_HEADER_SIZE: u64 = 57;
-pub const V7_RECORD_HEADER_SIZE: u64 = V3_RECORD_HEADER_SIZE;
 pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
 
 pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
@@ -182,6 +180,41 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     encoding.parse_vec(buf)
 }
 
+fn check_data<R>(reader: &mut R, filename: &str, offset: u64, size: u64, checksum: &Sha1, ignore_null_checksums: bool, hasher: &mut Sha1Hasher, buffer: &mut Vec<u8>) -> Result<()>
+where R: Read, R: Seek {
+    if ignore_null_checksums && checksum == &NULL_SHA1 {
+        return Ok(());
+    }
+    reader.seek(SeekFrom::Start(offset))?;
+    hasher.reset();
+    let mut remaining = size;
+    buffer.resize(BUFFER_SIZE, 0);
+    loop {
+        if remaining >= BUFFER_SIZE as u64 {
+            reader.read_exact(buffer)?;
+            hasher.input(&buffer);
+            remaining -= BUFFER_SIZE as u64;
+        } else {
+            let buffer = &mut buffer[..remaining as usize];
+            reader.read_exact(buffer)?;
+            hasher.input(&buffer);
+            break;
+        }
+    }
+    let mut actual_digest = [0u8; 20];
+    hasher.result(&mut actual_digest);
+    if &actual_digest != checksum {
+        return Err(Error::new(format!(
+            "checksum missmatch:\n\
+             \texpected: {}\n\
+             \tactual:   {}",
+             HexDisplay::new(checksum),
+             HexDisplay::new(&actual_digest)
+        )).with_path(filename));
+    }
+    Ok(())
+}
+
 impl Pak {
     #[inline]
     pub(crate) fn new(
@@ -233,11 +266,7 @@ impl Pak {
             index_sha1: Sha1,
         );
 
-        let version = if let Some(version) = options.force_version {
-            version
-        } else {
-            version
-        };
+        let version = options.force_version.unwrap_or(version);
 
         if !options.ignore_magic && magic != 0x5A6F12E1 {
             return Err(Error::new(format!("illegal file magic: 0x{:X}", magic)));
@@ -246,9 +275,7 @@ impl Pak {
         let read_record = match version {
             1 => Record::read_v1,
             2 => Record::read_v2,
-            3 => Record::read_v3,
-            4 => Record::read_v4,
-            7 => Record::read_v3, // TODO: sha1 sums seems to be wrong
+            _ if version <= 4 || version == 7 => Record::read_v3,
             _ => {
                 return Err(Error::new(format!("unsupported version: {}", version)));
             }
@@ -305,39 +332,7 @@ impl Pak {
         let mut actual_digest = [0u8; 20];
         let null_separator = if null_separated { '\0' } else { '\n' };
 
-        let mut check_data = |filename: &str, offset: u64, size: u64, checksum: &Sha1| -> Result<()> {
-            if ignore_null_checksums && checksum == &NULL_SHA1 {
-                return Ok(());
-            }
-            reader.seek(SeekFrom::Start(offset))?;
-            hasher.reset();
-            let mut remaining = size;
-            loop {
-                if remaining >= BUFFER_SIZE as u64 {
-                    reader.read_exact(&mut buffer)?;
-                    hasher.input(&buffer);
-                    remaining -= BUFFER_SIZE as u64;
-                } else {
-                    let buffer = &mut buffer[..remaining as usize];
-                    reader.read_exact(buffer)?;
-                    hasher.input(&buffer);
-                    break;
-                }
-            }
-            hasher.result(&mut actual_digest);
-            if &actual_digest != checksum {
-                return Err(Error::new(format!(
-                    "checksum missmatch:\n\
-                     expected: {}\n\
-                     actual:   {}",
-                     HexDisplay::new(checksum),
-                     HexDisplay::new(&actual_digest)
-                )).with_path(filename));
-            }
-            Ok(())
-        };
-
-        if let Err(error) = check_data("<archive index>", self.index_offset, self.index_size, &self.index_sha1) {
+        if let Err(error) = check_data(reader, "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut hasher, &mut buffer) {
             check_error!(error_count, abort_on_error, null_separator, error);
         }
 
@@ -365,7 +360,32 @@ impl Pak {
                 ).with_path(record.filename()));
             }
 
-            if let Err(error) = check_data(record.filename(), offset, record.size(), record.sha1()) {
+            if let Some(blocks) = record.compression_blocks() {
+                if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
+                    let base_offset = if self.version >= 7 { record.offset() } else { 0 };
+                    hasher.reset();
+
+                    for block in blocks {
+                        let block_size = block.end_offset - block.start_offset;
+
+                        buffer.resize(block_size as usize, 0);
+                        reader.seek(SeekFrom::Start(base_offset + block.start_offset))?;
+                        reader.read_exact(&mut buffer)?;
+                        hasher.input(&buffer);
+                    }
+
+                    hasher.result(&mut actual_digest);
+                    if &actual_digest != record.sha1() {
+                        check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
+                            "checksum missmatch:\n\
+                            \texpected: {}\n\
+                            \tactual:   {}",
+                            HexDisplay::new(record.sha1()),
+                            HexDisplay::new(&actual_digest)
+                        )).with_path(record.filename()));
+                    }
+                }
+            } else if let Err(error) = check_data(reader, record.filename(), offset, record.size(), record.sha1(), ignore_null_checksums, &mut hasher, &mut buffer) {
                 check_error!(error_count, abort_on_error, null_separator, error);
             }
         }
@@ -415,15 +435,8 @@ impl Pak {
         match version {
             1 => V1_RECORD_HEADER_SIZE,
             2 => V2_RECORD_HEADER_SIZE,
-            3 | 7 => {
+            _ if version <= 4 || version == 7 => {
                 let mut size: u64 = V3_RECORD_HEADER_SIZE;
-                if let Some(blocks) = &record.compression_blocks() {
-                    size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
-                }
-                size
-            }
-            4 => {
-                let mut size: u64 = V4_RECORD_HEADER_SIZE;
                 if let Some(blocks) = &record.compression_blocks() {
                     size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
                 }
@@ -469,7 +482,7 @@ impl Pak {
             }
             self::COMPR_ZLIB => {
                 if let Some(blocks) = record.compression_blocks() {
-                    let base_offset = record.offset();
+                    let base_offset = if self.version >= 7 { record.offset() } else { 0 };
 
                     let mut in_file = BufReader::new(in_file);
                     let mut out_file = BufWriter::new(out_file);

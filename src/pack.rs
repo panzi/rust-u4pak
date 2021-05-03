@@ -20,7 +20,7 @@ use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
 use flate2::{Compression, write::ZlibEncoder};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::parse_pak_path};
+use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::parse_pak_path, walkdir::walkdir};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -245,115 +245,78 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             filename
         };
 
+        let component_count = source_path.components().count();
 
-        let file_path = source_path; // TODO: walk dir
+        let mut handle_entry = |file_path: &Path| -> Result<()> {
+            let compression_blocks;
+            let mut compression_block_size = 0u32;
+            let mut size = 0u64;
 
-        let compression_blocks;
-        let mut compression_block_size = 0u32;
-        let mut size = 0u64;
-
-        let mut in_file = match File::open(&file_path) {
-            Ok(file) => file,
-            Err(error) => return Err(Error::io_with_path(error, file_path))
-        };
-
-        let metadata = match in_file.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) => return Err(Error::io_with_path(error, file_path))
-        };
-
-        let uncompressed_size = metadata.len();
-
-        let timestamp = if options.version == 1 {
-            let created = match metadata.created() {
-                Ok(created) => created,
+            let mut in_file = match File::open(&file_path) {
+                Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, file_path))
             };
-            let timestamp = match created.duration_since(UNIX_EPOCH) {
-                Ok(timestamp) => timestamp,
-                Err(error) =>
-                    return Err(Error::new(error.to_string()).with_path(file_path))
+
+            let metadata = match in_file.metadata() {
+                Ok(metadata) => metadata,
+                Err(error) => return Err(Error::io_with_path(error, file_path))
             };
-            Some(timestamp.as_secs())
-        } else {
-            None
-        };
 
-        hasher.reset();
+            let uncompressed_size = metadata.len();
 
-        match compression_method {
-            self::COMPR_NONE => {
-                size = uncompressed_size;
-                compression_blocks = None;
+            let timestamp = if options.version == 1 {
+                let created = match metadata.created() {
+                    Ok(created) => created,
+                    Err(error) => return Err(Error::io_with_path(error, file_path))
+                };
+                let timestamp = match created.duration_since(UNIX_EPOCH) {
+                    Ok(timestamp) => timestamp,
+                    Err(error) =>
+                        return Err(Error::new(error.to_string()).with_path(file_path))
+                };
+                Some(timestamp.as_secs())
+            } else {
+                None
+            };
 
-                writer.seek(SeekFrom::Current(base_header_size as i64))?;
+            hasher.reset();
 
-                let mut remaining = uncompressed_size as usize;
-                {
-                    // buffer might be bigger than BUFFER_SIZE if any previous
-                    // compression_block_size is bigger than BUFFER_SIZE
-                    let buffer = &mut buffer[..BUFFER_SIZE];
-                    while remaining >= BUFFER_SIZE {
+            match compression_method {
+                self::COMPR_NONE => {
+                    size = uncompressed_size;
+                    compression_blocks = None;
+
+                    writer.seek(SeekFrom::Current(base_header_size as i64))?;
+
+                    let mut remaining = uncompressed_size as usize;
+                    {
+                        // buffer might be bigger than BUFFER_SIZE if any previous
+                        // compression_block_size is bigger than BUFFER_SIZE
+                        let buffer = &mut buffer[..BUFFER_SIZE];
+                        while remaining >= BUFFER_SIZE {
+                            in_file.read_exact(buffer)?;
+                            writer.write_all(buffer)?;
+                            hasher.input(buffer);
+                            remaining -= BUFFER_SIZE;
+                        }
+                    }
+
+                    if remaining > 0 {
+                        let buffer = &mut buffer[..remaining];
                         in_file.read_exact(buffer)?;
                         writer.write_all(buffer)?;
                         hasher.input(buffer);
-                        remaining -= BUFFER_SIZE;
                     }
                 }
-
-                if remaining > 0 {
-                    let buffer = &mut buffer[..remaining];
-                    in_file.read_exact(buffer)?;
-                    writer.write_all(buffer)?;
-                    hasher.input(buffer);
-                }
-            }
-            self::COMPR_ZLIB => {
-                let compression_level = if let Some(compression_level) = path.compression_level {
-                    Compression::new(compression_level.get())
-                } else {
-                    compression_level
-                };
-                if options.version <= 2 {
-                    buffer.resize(uncompressed_size as usize, 0);
-                    in_file.read_exact(&mut buffer)?;
-
-                    out_buffer.clear();
-                    let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                    zlib.write_all(&buffer)?;
-                    zlib.finish()?;
-                    writer.write_all(&out_buffer)?;
-                    hasher.input(&out_buffer);
-
-                    size += out_buffer.len() as u64;
-
-                    compression_blocks = None;
-                } else {
-                    compression_block_size = path.compression_block_size
-                        .unwrap_or(options.compression_block_size)
-                        .get();
-
-                    if compression_block_size as u64 > uncompressed_size {
-                        compression_block_size = uncompressed_size as u32;
-                    }
-
-                    let mut header_size = base_header_size;
-                    if uncompressed_size > 0 {
-                        header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
-                    }
-                    writer.seek(SeekFrom::Current(header_size as i64))?;
-
-                    if buffer.len() < compression_block_size as usize {
-                        buffer.resize(compression_block_size as usize, 0);
-                    }
-
-                    let buffer = &mut buffer[..compression_block_size as usize];
-                    let mut blocks = Vec::<CompressionBlock>::new();
-                    let mut remaining = uncompressed_size as usize;
-                    let mut start_offset = 0;
-
-                    while remaining >= compression_block_size as usize {
-                        in_file.read_exact(buffer)?;
+                self::COMPR_ZLIB => {
+                    let compression_level = if let Some(compression_level) = path.compression_level {
+                        Compression::new(compression_level.get())
+                    } else {
+                        compression_level
+                    };
+                    if options.version <= 2 {
+                        buffer.resize(uncompressed_size as usize, 0);
+                        in_file.read_exact(&mut buffer)?;
 
                         out_buffer.clear();
                         let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
@@ -362,67 +325,135 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         writer.write_all(&out_buffer)?;
                         hasher.input(&out_buffer);
 
-                        let compressed_block_size = out_buffer.len() as u64;
-                        size += compressed_block_size;
+                        size += out_buffer.len() as u64;
 
-                        remaining -= compression_block_size as usize;
-                        let end_offset = start_offset + compressed_block_size;
-                        blocks.push(CompressionBlock {
-                            start_offset,
-                            end_offset,
-                        });
-                        start_offset = end_offset;
+                        compression_blocks = None;
+                    } else {
+                        compression_block_size = path.compression_block_size
+                            .unwrap_or(options.compression_block_size)
+                            .get();
+
+                        if compression_block_size as u64 > uncompressed_size {
+                            compression_block_size = uncompressed_size as u32;
+                        }
+
+                        let mut header_size = base_header_size;
+                        if uncompressed_size > 0 {
+                            header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
+                        }
+                        writer.seek(SeekFrom::Current(header_size as i64))?;
+
+                        if buffer.len() < compression_block_size as usize {
+                            buffer.resize(compression_block_size as usize, 0);
+                        }
+
+                        let buffer = &mut buffer[..compression_block_size as usize];
+                        let mut blocks = Vec::<CompressionBlock>::new();
+                        let mut remaining = uncompressed_size as usize;
+                        let mut start_offset = 0;
+
+                        while remaining >= compression_block_size as usize {
+                            in_file.read_exact(buffer)?;
+
+                            out_buffer.clear();
+                            let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
+                            zlib.write_all(&buffer)?;
+                            zlib.finish()?;
+                            writer.write_all(&out_buffer)?;
+                            hasher.input(&out_buffer);
+
+                            let compressed_block_size = out_buffer.len() as u64;
+                            size += compressed_block_size;
+
+                            remaining -= compression_block_size as usize;
+                            let end_offset = start_offset + compressed_block_size;
+                            blocks.push(CompressionBlock {
+                                start_offset,
+                                end_offset,
+                            });
+                            start_offset = end_offset;
+                        }
+
+                        if remaining > 0 {
+                            let buffer = &mut buffer[..remaining];
+                            in_file.read_exact(buffer)?;
+
+                            out_buffer.clear();
+                            let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
+                            zlib.write_all(buffer)?;
+                            zlib.finish()?;
+                            writer.write_all(&out_buffer)?;
+                            hasher.input(&out_buffer);
+
+                            let compressed_block_size = out_buffer.len() as u64;
+                            size += compressed_block_size;
+
+                            let end_offset = start_offset + compressed_block_size;
+                            blocks.push(CompressionBlock {
+                                start_offset,
+                                end_offset,
+                            });
+                        }
+
+                        compression_blocks = Some(blocks);
                     }
-
-                    if remaining > 0 {
-                        let buffer = &mut buffer[..remaining];
-                        in_file.read_exact(buffer)?;
-
-                        out_buffer.clear();
-                        let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                        zlib.write_all(buffer)?;
-                        zlib.finish()?;
-                        writer.write_all(&out_buffer)?;
-                        hasher.input(&out_buffer);
-
-                        let compressed_block_size = out_buffer.len() as u64;
-                        size += compressed_block_size;
-
-                        let end_offset = start_offset + compressed_block_size;
-                        blocks.push(CompressionBlock {
-                            start_offset,
-                            end_offset,
-                        });
-                    }
-
-                    compression_blocks = Some(blocks);
+                }
+                _ => {
+                    return Err(Error::new(
+                        format!("{}: unsupported compression method: {} ({})",
+                            path.filename, compression_method_name(compression_method), compression_method)).
+                        with_path(pak_path))
                 }
             }
-            _ => {
-                return Err(Error::new(
-                    format!("{}: unsupported compression method: {} ({})",
-                        path.filename, compression_method_name(compression_method), compression_method)).
-                    with_path(pak_path))
+
+            let mut sha1: Sha1 = [0u8; 20];
+            hasher.result(&mut sha1);
+
+            let mut pak_filename: Vec<String> = file_path.components()
+                .skip(component_count)
+                .map(|comp| comp.as_os_str().to_string_lossy().to_string())
+                .collect();
+
+            pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
+
+            records.push(Record::new(
+                make_pak_path(pak_filename.iter()),
+                offset,
+                size,
+                uncompressed_size,
+                compression_method,
+                timestamp,
+                sha1,
+                compression_blocks,
+                false,
+                compression_block_size,
+            ));
+
+            data_size += size;
+
+            Ok(())
+        };
+
+        let metadata = match source_path.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(Error::io_with_path(error, source_path))
+        };
+
+        if metadata.is_dir() {
+            let iter = match walkdir(&source_path) {
+                Ok(iter) => iter,
+                Err(error) => return Err(Error::io_with_path(error, source_path))
+            };
+            for entry in iter {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => return Err(Error::io_with_path(error, source_path))
+                };
+                handle_entry(&entry.path())?;
             }
+        } else {
+            handle_entry(&source_path)?;
         }
-
-        let mut sha1: Sha1 = [0u8; 20];
-        hasher.result(&mut sha1);
-
-        records.push(Record::new(
-            make_pak_path(filename.iter()), // TODO
-            offset,
-            size,
-            uncompressed_size,
-            compression_method,
-            timestamp,
-            sha1,
-            compression_blocks,
-            false,
-            compression_block_size,
-        ));
-
-        data_size += size;
     }
 
     let index_offset = data_size;

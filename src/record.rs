@@ -116,22 +116,6 @@ impl Record {
         }
     }
 
-    pub fn v4(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Sha1,
-              compression_blocks: Option<Vec<CompressionBlock>>, encrypted: bool, compression_block_size: u32) -> Self {
-        Self {
-            filename,
-            offset,
-            size,
-            uncompressed_size,
-            compression_method,
-            timestamp: None,
-            sha1,
-            compression_blocks,
-            encrypted,
-            compression_block_size,
-        }
-    }
-
     #[inline]
     pub fn filename(&self) -> &str {
         &self.filename
@@ -222,24 +206,6 @@ impl Record {
         );
 
         Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
-    }
-
-    pub fn read_v4(reader: &mut impl Read, filename: String) -> Result<Record> {
-        decode!(reader,
-            offset: u64,
-            size: u64,
-            uncompressed_size: u64,
-            compression_method: u32,
-            sha1: Sha1,
-            if compression_method != COMPR_NONE {
-                compression_blocks: CompressionBlock [u32],
-            }
-            encrypted: u8,
-            compression_block_size: u32,
-            _unknown: u32,
-        );
-
-        Ok(Record::v4(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
     }
 
     pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {

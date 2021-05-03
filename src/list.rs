@@ -108,9 +108,9 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
                 let mut row = vec![
                     format!("{}", record.offset()),
                     fmt_size(record.uncompressed_size()),
+                    fmt_size(record.size()),
                     compression_method_name(record.compression_method()).to_owned(),
                     fmt_size(record.compression_block_size() as u64),
-                    fmt_size(record.size()),
                 ];
                 if version == 1 {
                     if let Some(timestamp) = record.timestamp() {
@@ -130,13 +130,13 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
 
             if version == 1 {
                 print_table(
-                    &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "Timestamp", "SHA1", "Filename"],
-                    &[Right,    Right,  Left,           Right,              Right,        Left,        Left,  Left],
+                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "Timestamp", "SHA1", "Filename"],
+                    &[Right,    Right,  Right,        Left,           Right,              Left,        Left,   Left],
                     &table);
             } else {
                 print_table(
-                    &["Offset", "Size", "Compr-Method", "Compr-Block-Size", "Compr-Size", "SHA1", "Filename"],
-                    &[Right,    Right,  Left,           Right,              Right,        Left,  Left],
+                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "SHA1", "Filename"],
+                    &[Right,    Right,  Right,        Left,           Right,              Left,   Left],
                     &table);
             }
         }
