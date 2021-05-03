@@ -1,6 +1,7 @@
 /target
 /tmp
 *.zip
+*.exe
 .*
 /perf.data
 /perf.data.old

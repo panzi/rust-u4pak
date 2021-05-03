@@ -371,19 +371,22 @@ impl Pak {
             }
 
             if let Err(error) = reader.seek(SeekFrom::Start(record.offset())) {
-                check_error!(error_count, abort_on_error, null_separator, Error::io_with_path(error, record.filename()));
+                check_error!(error_count, abort_on_error, null_separator,
+                    Error::io_with_path(error, record.filename()));
             } else {
                 match read_record(reader, record.filename().to_string()) {
                     Ok(other_record) => {
                         if other_record.offset() != 0 {
                             check_error!(error_count, abort_on_error, null_separator,
-                                Error::new(format!("data record offset field is not 0 but {}", other_record.offset()))
+                                Error::new(format!("data record offset field is not 0 but {}",
+                                        other_record.offset()))
                                     .with_path(other_record.filename()));
                         }
 
                         if !record.same_metadata(&other_record) {
                             check_error!(error_count, abort_on_error, null_separator,
-                                Error::new(format!("metadata missmatch:\n{}", record.metadata_diff(&other_record)))
+                                Error::new(format!("metadata missmatch:\n{}",
+                                        record.metadata_diff(&other_record)))
                                     .with_path(other_record.filename()));
                         }
                     }
@@ -418,7 +421,9 @@ impl Pak {
                         )).with_path(record.filename()));
                     }
                 }
-            } else if let Err(error) = check_data(reader, record.filename(), offset, record.size(), record.sha1(), ignore_null_checksums, &mut hasher, &mut buffer) {
+            } else if let Err(error) = check_data(reader, record.filename(), offset,
+                    record.size(), record.sha1(), ignore_null_checksums,
+                    &mut hasher, &mut buffer) {
                 check_error!(error_count, abort_on_error, null_separator, error);
             }
         }
