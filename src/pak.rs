@@ -336,6 +336,16 @@ impl Pak {
             check_error!(error_count, abort_on_error, null_separator, error);
         }
 
+        let version = self.version;
+        let read_record = match version {
+            1 => Record::read_v1,
+            2 => Record::read_v2,
+            _ if version <= 4 || version == 7 => Record::read_v3,
+            _ => {
+                return Err(Error::new(format!("unsupported version: {}", version)));
+            }
+        };
+
         for record in records {
             let record = record.as_ref();
             if !COMPR_METHODS.contains(&record.compression_method()) {
@@ -358,6 +368,29 @@ impl Pak {
                 check_error!(error_count, abort_on_error, null_separator, Error::new(
                     "data bleeds into index".to_string()
                 ).with_path(record.filename()));
+            }
+
+            if let Err(error) = reader.seek(SeekFrom::Start(record.offset())) {
+                check_error!(error_count, abort_on_error, null_separator, Error::io_with_path(error, record.filename()));
+            } else {
+                match read_record(reader, record.filename().to_string()) {
+                    Ok(other_record) => {
+                        if other_record.offset() != 0 {
+                            check_error!(error_count, abort_on_error, null_separator,
+                                Error::new(format!("data record offset field is not 0 but {}", other_record.offset()))
+                                    .with_path(other_record.filename()));
+                        }
+
+                        if !record.same_metadata(&other_record) {
+                            check_error!(error_count, abort_on_error, null_separator,
+                                Error::new(format!("metadata missmatch:\n{}", record.metadata_diff(&other_record)))
+                                    .with_path(other_record.filename()));
+                        }
+                    }
+                    Err(error) => {
+                        check_error!(error_count, abort_on_error, null_separator, error);
+                    }
+                };
             }
 
             if let Some(blocks) = record.compression_blocks() {

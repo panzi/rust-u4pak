@@ -14,15 +14,24 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::io::{Read, Write};
+use std::fmt::Write as FmtWrite;
 
-use crate::pak::{COMPR_NONE, Sha1};
+use crate::pak::{COMPR_NONE, HexDisplay, Sha1};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
 use crate::encode::Encode;
 use crate::Result;
 
-#[derive(Debug)]
+macro_rules! cmp_record_field {
+    ($buf:expr, $field:ident, $r1:expr, $r2:expr) => {
+        if $r1.$field != $r2.$field {
+            let _ = write!($buf, "\t{}: {:?} != {:?}\n", stringify!($field), $r1.$field, $r2.$field);
+        }
+    };
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Record {
     filename: String,
     offset: u64,
@@ -36,7 +45,7 @@ pub struct Record {
     compression_block_size: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CompressionBlock {
     pub start_offset: u64,
     pub end_offset: u64,
@@ -245,6 +254,43 @@ impl Record {
             self.compression_block_size,
         );
         Ok(())
+    }
+
+    pub fn same_metadata(&self, other: &Record) -> bool {
+        // compare all metadata except for the filename
+        // data records always have offset == 0 it seems, so skip that
+        self.size                   == other.size               &&
+        self.uncompressed_size      == other.uncompressed_size  &&
+        self.compression_method     == other.compression_method &&
+        self.timestamp              == other.timestamp          &&
+        self.sha1                   == other.sha1               &&
+        self.compression_blocks     == other.compression_blocks &&
+        self.encrypted              == other.encrypted          &&
+        self.compression_block_size == other.compression_block_size
+    }
+
+    pub fn metadata_diff(&self, other: &Record) -> String {
+        let mut buf = String::new();
+
+        cmp_record_field!(buf, size,                   self, other);
+        cmp_record_field!(buf, uncompressed_size,      self, other);
+        cmp_record_field!(buf, timestamp,              self, other);
+        cmp_record_field!(buf, encrypted,              self, other);
+        cmp_record_field!(buf, compression_block_size, self, other);
+
+        if self.sha1 != other.sha1 {
+            let _ = write!(buf, "\tsha1: {} != {}",
+                HexDisplay::new(&self.sha1),
+                HexDisplay::new(&other.sha1));
+        }
+
+        if self.compression_blocks != other.compression_blocks {
+            let _ = write!(buf, "\tcompression_blocks:\n\t\t{:?}\n\t\t\t!=\n\t\t{:?}",
+                self.compression_blocks,
+                other.compression_blocks);
+        }
+
+        buf
     }
 }
 
