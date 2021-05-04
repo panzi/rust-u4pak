@@ -497,7 +497,11 @@ impl Pak {
             path.push(component);
         }
 
-        let mut out_file = match OpenOptions::new().write(true).create(true).open(&path) {
+        let mut out_file = match OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&path) {
             Ok(file) => file,
             Err(error) => {
                 if error.kind() == std::io::ErrorKind::NotFound {
@@ -517,6 +521,7 @@ impl Pak {
             self::COMPR_NONE => {
                 in_file.seek(SeekFrom::Start(record.offset() + Self::header_size(self.version, record)))?;
                 transfer(in_file, &mut out_file, record.size() as usize)?;
+                out_file.flush()?;
             }
             self::COMPR_ZLIB => {
                 if let Some(blocks) = record.compression_blocks() {
@@ -539,6 +544,7 @@ impl Pak {
                         zlib.read_to_end(&mut out_buffer)?;
                         out_file.write_all(&out_buffer)?;
                     }
+                    out_file.flush()?;
                 } else {
                     // version 2 has compression support, but not compression blocks
                     in_file.seek(SeekFrom::Start(record.offset() + Self::header_size(self.version, record)))?;
@@ -550,6 +556,7 @@ impl Pak {
                     let mut zlib = ZlibDecoder::new(&in_buffer[..]);
                     zlib.read_to_end(&mut out_buffer)?;
                     out_file.write_all(&out_buffer)?;
+                    out_file.flush()?;
                 }
             }
             _ => {
@@ -559,6 +566,7 @@ impl Pak {
                     .with_path(record.filename()));
             }
         }
+
         Ok(())
     }
 }

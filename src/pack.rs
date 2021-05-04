@@ -551,8 +551,13 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
     match encoding {
         Encoding::UTF8 => {
             let bytes = path.as_bytes();
-            writer.write_all(&bytes.len().to_le_bytes())?;
+            if bytes.len() > (u32::MAX - 1) as usize {
+                return Err(Error::new(format!("path is too long: {:?}", path)));
+            }
+            let size = (bytes.len() + 1) as u32;
+            writer.write_all(&size.to_le_bytes())?;
             writer.write_all(bytes)?;
+            writer.write_all(&[0])?;
         }
         Encoding::ASCII => {
             for ch in path.chars() {
@@ -565,8 +570,13 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
             }
 
             let bytes = path.as_bytes();
-            writer.write_all(&bytes.len().to_le_bytes())?;
+            if bytes.len() > (u32::MAX - 1) as usize {
+                return Err(Error::new(format!("path is too long: {:?}", path)));
+            }
+            let size = (bytes.len() + 1) as u32;
+            writer.write_all(&size.to_le_bytes())?;
             writer.write_all(bytes)?;
+            writer.write_all(&[0])?;
         }
         Encoding::Latin1 => {
             for ch in path.chars() {
@@ -578,8 +588,13 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
                 }
             }
 
-            let bytes: Vec<_> = path.chars().map(|ch| ch as u8).collect();
-            writer.write_all(&bytes.len().to_le_bytes())?;
+            let mut bytes: Vec<_> = path.chars().map(|ch| ch as u8).collect();
+            bytes.push(0);
+            if bytes.len() > u32::MAX as usize {
+                return Err(Error::new(format!("path is too long: {:?}", path)));
+            }
+            let size = bytes.len() as u32;
+            writer.write_all(&size.to_le_bytes())?;
             writer.write_all(&bytes)?;
         }
     }
