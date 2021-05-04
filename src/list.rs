@@ -130,13 +130,13 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
 
             if version == 1 {
                 print_table(
-                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "Timestamp", "SHA1", "Filename"],
-                    &[Right,    Right,  Right,        Left,           Right,              Left,        Left,   Left],
+                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "Timestamp", "SHA-1", "Filename"],
+                    &[Right,    Right,  Right,        Left,           Right,              Left,        Left,    Left],
                     &table);
             } else {
                 print_table(
-                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "SHA1", "Filename"],
-                    &[Right,    Right,  Right,        Left,           Right,              Left,   Left],
+                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "SHA-1", "Filename"],
+                    &[Right,    Right,  Right,        Left,           Right,              Left,    Left],
                     &table);
             }
         }

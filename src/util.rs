@@ -101,19 +101,11 @@ pub fn print_table(header: &[impl AsRef<str>], align: &[Align], body: &[Vec<impl
     }
 
     print_row(header, &lens, align);
-    let mut first = true;
-    for len in lens.iter() {
-        let mut len = *len;
-        if first {
-            first = false;
-        } else {
-            len += 2; // cell spacing
-        }
-
-        while len > 0 {
-            print!("-");
-            len -= 1;
-        }
+    let line_len = if lens.is_empty() { 0 } else {
+        lens.iter().sum::<usize>() + 2 * (lens.len() - 1)
+    };
+    for _ in 0..line_len {
+        print!("-");
     }
     println!();
 

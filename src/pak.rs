@@ -173,7 +173,7 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
 
     let mut buf = vec![0u8; size as usize];
     reader.read_exact(&mut buf)?;
-    if let Some(index) = buf.iter().position(|byte| *byte == 0) {
+    if let Some(index) = buf.iter().position(|&byte| byte == 0) {
         buf.truncate(index);
     }
 
