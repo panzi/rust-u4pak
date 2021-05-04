@@ -69,7 +69,7 @@ fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
 }
 
 pub fn parse_compression_method(value: &str) -> Result<u32> {
-    if value.eq_ignore_ascii_case("node") {
+    if value.eq_ignore_ascii_case("none") {
         Ok(COMPR_NONE)
     } else if value.eq_ignore_ascii_case("zlib") {
         Ok(COMPR_ZLIB)
@@ -514,8 +514,6 @@ fn run() -> Result<()> {
                 compression_block_size,
                 compression_level,
             })?;
-
-            panic!("pack is not implemented yet");
         }
         #[cfg(target_os = "linux")]
         ("mount", Some(_args)) => {

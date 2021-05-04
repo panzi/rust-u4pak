@@ -75,8 +75,8 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
     fn try_from(filename: &'a str) -> std::result::Result<Self, Self::Error> {
         // :zlib,level=5,block_size=512,rename=egg/spam.txt:/foo/bar/baz.txt
         if filename.starts_with(':') {
-            if let Some(index) = filename.find(':') {
-                let (param_str, filename) = filename.split_at(index + 1);
+            if let Some(index) = filename[1..].find(':') {
+                let (param_str, filename) = filename.split_at(index + 2);
                 let param_str = &param_str[1..param_str.len() - 1];
 
                 let mut compression_method = COMPR_DEFAULT;
@@ -164,10 +164,10 @@ impl Default for PackOptions<'_> {
 }
 
 pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions) -> Result<Pak> {
-    let write_record = match options.version {
-        1 => Record::write_v1,
-        2 => Record::write_v2,
-        3 => Record::write_v3,
+    let write_record_inline = match options.version {
+        1 => Record::write_v1_inline,
+        2 => Record::write_v2_inline,
+        3 => Record::write_v3_inline,
         _ => {
             return Err(Error::new(
                 format!("unsupported version: {}", options.version)).
@@ -212,7 +212,6 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     };
 
     for path in paths {
-        let offset = data_size;
         let compression_method = if path.compression_method == COMPR_DEFAULT {
             options.compression_method
         } else {
@@ -233,12 +232,14 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             let filename = path.filename
                 .trim_end_matches(|ch| ch == '/' || ch == '\\')
                 .split(|ch| ch == '/' || ch == '\\')
+                .filter(|comp| !comp.is_empty())
                 .collect::<Vec<_>>();
 
             #[cfg(not(target_os = "windows"))]
             let filename = path.filename
                 .trim_end_matches('/')
                 .split('/')
+                .filter(|comp| !comp.is_empty())
                 .collect::<Vec<_>>();
 
             source_path = filename.iter().collect();
@@ -248,9 +249,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         let component_count = source_path.components().count();
 
         let mut handle_entry = |file_path: &Path| -> Result<()> {
+            let offset = data_size;
             let compression_blocks;
             let mut compression_block_size = 0u32;
-            let mut size = 0u64;
+            let mut size;
 
             let mut in_file = match File::open(&file_path) {
                 Ok(file) => file,
@@ -287,6 +289,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     compression_blocks = None;
 
                     writer.seek(SeekFrom::Current(base_header_size as i64))?;
+                    data_size += base_header_size;
 
                     let mut remaining = uncompressed_size as usize;
                     {
@@ -314,7 +317,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     } else {
                         compression_level
                     };
+                    size = 0u64;
                     if options.version <= 2 {
+                        writer.seek(SeekFrom::Current(base_header_size as i64))?;
+                        data_size += base_header_size;
+
                         buffer.resize(uncompressed_size as usize, 0);
                         in_file.read_exact(&mut buffer)?;
 
@@ -342,6 +349,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                             header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
                         }
                         writer.seek(SeekFrom::Current(header_size as i64))?;
+                        data_size += header_size;
 
                         if buffer.len() < compression_block_size as usize {
                             buffer.resize(compression_block_size as usize, 0);
@@ -350,7 +358,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         let buffer = &mut buffer[..compression_block_size as usize];
                         let mut blocks = Vec::<CompressionBlock>::new();
                         let mut remaining = uncompressed_size as usize;
-                        let mut start_offset = 0;
+                        let mut start_offset = if options.version >= 7 { offset } else { 0 };
 
                         while remaining >= compression_block_size as usize {
                             in_file.read_exact(buffer)?;
@@ -457,25 +465,30 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     }
 
     let index_offset = data_size;
+    // FIXME: HOW IS THE FILE BIGGER THAN data_size AT THIS POINT!?
+    eprintln!("index_offset: {}", index_offset);
+    eprintln!("current:      {}", writer.seek(SeekFrom::Current(0))?);
+    eprintln!("file size:    {}", writer.seek(SeekFrom::End(0))?);
 
     for record in &records {
         writer.seek(SeekFrom::Start(record.offset()))?;
-        write_record(record, &mut writer)?;
+        write_record_inline(record, &mut writer)?;
     }
 
     writer.seek(SeekFrom::Start(index_offset))?;
 
     let mut index_size = 0u64;
 
-    let mount_pount = if let Some(mount_point) = options.mount_point {
-        mount_point
-    } else {
-        ""
-    };
+    let mount_pount = options.mount_point.unwrap_or("");
 
+    hasher.reset();
     buffer.clear();
+
     write_path(&mut buffer, mount_pount, options.encoding)?;
+    encode!(&mut buffer, records.len() as u32);
     writer.write_all(&buffer)?;
+    hasher.input(&buffer);
+
     index_size += buffer.len() as u64;
 
     let write_record = match options.version {
@@ -509,17 +522,14 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         index_size,
         index_sha1,
     );
+    writer.flush()?;
 
     Ok(Pak::new(
         options.version,
         index_offset,
         index_size,
         index_sha1,
-        if let Some(mount_point) = options.mount_point {
-            Some(mount_point.to_string())
-        } else {
-            None
-        },
+        options.mount_point.map(str::to_string),
         records,
     ))
 }
@@ -529,19 +539,19 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
         Encoding::UTF8 => {
             let bytes = path.as_bytes();
             writer.write_all(&bytes.len().to_le_bytes())?;
-
             writer.write_all(bytes)?;
         }
         Encoding::ASCII => {
-            let bytes = path.as_bytes();
-            for &byte in bytes {
-                if byte > 127 {
+            for ch in path.chars() {
+                if ch > 127 as char {
                     return Err(Error::new(format!(
-                        "Illegal byte 0x{:02x} ({}) for ASCII codec in string: {:?}",
-                        byte, byte, path,
+                        "Illegal char {:?} (0x{:x}) for ASCII codec in string: {:?}",
+                        ch, ch as u32, path,
                     )));
                 }
             }
+
+            let bytes = path.as_bytes();
             writer.write_all(&bytes.len().to_le_bytes())?;
             writer.write_all(bytes)?;
         }
@@ -556,7 +566,6 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
             }
 
             let bytes: Vec<_> = path.chars().map(|ch| ch as u8).collect();
-
             writer.write_all(&bytes.len().to_le_bytes())?;
             writer.write_all(&bytes)?;
         }

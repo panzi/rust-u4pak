@@ -229,6 +229,18 @@ impl Record {
         Ok(())
     }
 
+    pub fn write_v1_inline(&self, writer: &mut impl Write) -> Result<()> {
+        encode!(writer,
+            0u64,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.timestamp.unwrap_or(0),
+            self.sha1,
+        );
+        Ok(())
+    }
+
     pub fn write_v2(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
@@ -240,9 +252,36 @@ impl Record {
         Ok(())
     }
 
+    pub fn write_v2_inline(&self, writer: &mut impl Write) -> Result<()> {
+        encode!(writer,
+            0u64,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+        );
+        Ok(())
+    }
+
     pub fn write_v3(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+            if let Some(blocks) = &self.compression_blocks {
+                blocks [u32],
+            }
+            self.encrypted as u8,
+            self.compression_block_size,
+        );
+        Ok(())
+    }
+
+    pub fn write_v3_inline(&self, writer: &mut impl Write) -> Result<()> {
+        encode!(writer,
+            0u64,
             self.size,
             self.uncompressed_size,
             self.compression_method,

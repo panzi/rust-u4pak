@@ -2,8 +2,10 @@
 /tmp
 *.zip
 *.exe
+*.pak
 .*
 /perf.data
 /perf.data.old
+/dump
 !.keep
 !.gitignore

@@ -179,7 +179,9 @@ pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>:
 }
 
 pub fn parse_pak_path<'a>(path: &'a str) -> impl std::iter::Iterator<Item=&'a str> {
-    path.trim_matches('/').split('/')
+    path.trim_matches('/')
+        .split('/')
+        .filter(|comp| !comp.is_empty())
 }
 
 pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<str>>) -> String {
