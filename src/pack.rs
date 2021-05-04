@@ -189,6 +189,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     let mut out_file = match OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .open(pak_path) {
             Ok(file) => file,
             Err(error) => return Err(Error::io_with_path(error, pak_path))
@@ -210,6 +211,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             panic!("unsupported version: {}", options.version)
         }
     };
+    let mut header_buffer = vec![0u8; base_header_size as usize];
 
     for path in paths {
         let compression_method = if path.compression_method == COMPR_DEFAULT {
@@ -288,13 +290,16 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     size = uncompressed_size;
                     compression_blocks = None;
 
-                    writer.seek(SeekFrom::Current(base_header_size as i64))?;
+                    writer.write_all(&header_buffer[..base_header_size as usize])?;
                     data_size += base_header_size;
 
                     let mut remaining = uncompressed_size as usize;
                     {
                         // buffer might be bigger than BUFFER_SIZE if any previous
                         // compression_block_size is bigger than BUFFER_SIZE
+                        if buffer.len() < BUFFER_SIZE {
+                            buffer.resize(BUFFER_SIZE, 0);
+                        }
                         let buffer = &mut buffer[..BUFFER_SIZE];
                         while remaining >= BUFFER_SIZE {
                             in_file.read_exact(buffer)?;
@@ -319,11 +324,14 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     };
                     size = 0u64;
                     if options.version <= 2 {
-                        writer.seek(SeekFrom::Current(base_header_size as i64))?;
+                        writer.write_all(&header_buffer[..base_header_size as usize])?;
                         data_size += base_header_size;
 
-                        buffer.resize(uncompressed_size as usize, 0);
-                        in_file.read_exact(&mut buffer)?;
+                        if buffer.len() < uncompressed_size as usize {
+                            buffer.resize(uncompressed_size as usize, 0);
+                        }
+                        let buffer = &mut buffer[..uncompressed_size as usize];
+                        in_file.read_exact(buffer)?;
 
                         out_buffer.clear();
                         let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
@@ -348,7 +356,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         if uncompressed_size > 0 {
                             header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
                         }
-                        writer.seek(SeekFrom::Current(header_size as i64))?;
+                        if header_buffer.len() < header_size as usize {
+                            header_buffer.resize(header_size as usize, 0);
+                        }
+                        writer.write_all(&header_buffer[..header_size as usize])?;
                         data_size += header_size;
 
                         if buffer.len() < compression_block_size as usize {
@@ -457,18 +468,20 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     Ok(entry) => entry,
                     Err(error) => return Err(Error::io_with_path(error, source_path))
                 };
-                handle_entry(&entry.path())?;
+                match handle_entry(&entry.path()) {
+                    Ok(()) => {}
+                    Err(error) => return Err(error.with_path_if_none(entry.path()))
+                }
             }
         } else {
-            handle_entry(&source_path)?;
+            match handle_entry(&source_path) {
+                Ok(()) => {}
+                Err(error) => return Err(error.with_path_if_none(source_path))
+            }
         }
     }
 
     let index_offset = data_size;
-    // FIXME: HOW IS THE FILE BIGGER THAN data_size AT THIS POINT!?
-    eprintln!("index_offset: {}", index_offset);
-    eprintln!("current:      {}", writer.seek(SeekFrom::Current(0))?);
-    eprintln!("file size:    {}", writer.seek(SeekFrom::End(0))?);
 
     for record in &records {
         writer.seek(SeekFrom::Start(record.offset()))?;
