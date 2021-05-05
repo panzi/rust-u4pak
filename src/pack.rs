@@ -354,7 +354,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                             compression_block_size = uncompressed_size as u32;
                         }
 
-                        let mut header_size = base_header_size;
+                        let mut header_size = base_header_size + 4;
                         if uncompressed_size > 0 {
                             header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
                         }
