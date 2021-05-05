@@ -67,10 +67,10 @@ pub fn print_row(row: &[impl AsRef<str>], lens: &[usize], align: &[Align]) {
                 print!("  "); // cell spacing
             }
 
-            if index == last_index {
-                print!("{}", cell.as_ref());
-            } else if align.is_right() {
+            if align.is_right() {
                 print!("{:>1$}", cell.as_ref(), *len);
+            } else if index == last_index {
+                print!("{}", cell.as_ref());
             } else {
                 print!("{:<1$}", cell.as_ref(), *len);
             }

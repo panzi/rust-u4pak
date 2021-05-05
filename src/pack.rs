@@ -72,11 +72,11 @@ impl<'a> PackPath<'a> {
 impl<'a> TryFrom<&'a str> for PackPath<'a> {
     type Error = crate::result::Error;
 
-    fn try_from(filename: &'a str) -> std::result::Result<Self, Self::Error> {
+    fn try_from(path_spec: &'a str) -> std::result::Result<Self, Self::Error> {
         // :zlib,level=5,block_size=512,rename=egg/spam.txt:/foo/bar/baz.txt
-        if filename.starts_with(':') {
-            if let Some(index) = filename[1..].find(':') {
-                let (param_str, filename) = filename.split_at(index + 2);
+        if path_spec.starts_with(':') {
+            if let Some(index) = path_spec[1..].find(':') {
+                let (param_str, filename) = path_spec.split_at(index + 2);
                 let param_str = &param_str[1..param_str.len() - 1];
 
                 let mut compression_method = COMPR_DEFAULT;
@@ -87,6 +87,8 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                 for param in param_str.split(',') {
                     if param.eq_ignore_ascii_case("zlib") {
                         compression_method = COMPR_ZLIB;
+                    } else if param.eq_ignore_ascii_case("none") {
+                        compression_method = COMPR_NONE;
                     } else if let Some(index) = param.find('=') {
                         let (key, value) = param.split_at(index + 1);
                         let key = &key[..key.len() - 1];
@@ -104,7 +106,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                                     _ => {
                                         return Err(Error::new(format!(
                                             "illegal path specification, illegal parameter value {:?} in: {:?}",
-                                            param, filename)));
+                                            param, path_spec)));
                                     }
                                 }
                             }
@@ -113,12 +115,12 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                         } else {
                             return Err(Error::new(format!(
                                 "illegal path specification, unhandeled parameter {:?} in: {:?}",
-                                param, filename)));
+                                param, path_spec)));
                         }
                     } else {
                         return Err(Error::new(format!(
                             "illegal path specification, unhandeled parameter {:?} in: {:?}",
-                            param, filename)));
+                            param, path_spec)));
                     }
                 }
 
@@ -132,10 +134,10 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
             } else {
                 return Err(Error::new(format!(
                     "illegal path specification, expected a second ':' in: {:?}",
-                    filename)));
+                    path_spec)));
             }
         } else {
-            return Ok(Self::new(filename));
+            return Ok(Self::new(path_spec));
         }
     }
 }
@@ -322,7 +324,6 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     } else {
                         compression_level
                     };
-                    size = 0u64;
                     if options.version <= 2 {
                         writer.write_all(&header_buffer[..base_header_size as usize])?;
                         data_size += base_header_size;
@@ -340,10 +341,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         writer.write_all(&out_buffer)?;
                         hasher.input(&out_buffer);
 
-                        size += out_buffer.len() as u64;
+                        size = out_buffer.len() as u64;
 
                         compression_blocks = None;
                     } else {
+                        size = 0u64;
                         compression_block_size = path.compression_block_size
                             .unwrap_or(options.compression_block_size)
                             .get();
@@ -369,7 +371,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         let buffer = &mut buffer[..compression_block_size as usize];
                         let mut blocks = Vec::<CompressionBlock>::new();
                         let mut remaining = uncompressed_size as usize;
-                        let mut start_offset = if options.version >= 7 { offset } else { 0 };
+                        let mut start_offset = if options.version >= 7 { header_size } else { data_size };
 
                         while remaining >= compression_block_size as usize {
                             in_file.read_exact(buffer)?;

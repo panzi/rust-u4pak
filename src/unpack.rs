@@ -16,18 +16,38 @@
 use std::path::Path;
 use std::fs::File;
 
-use crate::Result;
+use crate::{Result, pak::COMPR_NONE};
 use crate::Record;
 use crate::Pak;
 use crate::Filter;
 
 #[inline]
-fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
-    for record in records_iter {
-        match pak.unpack(record, in_file, outdir) {
-            Ok(()) => {},
-            Err(error) => {
-                return Err(error.with_path_if_none(record.filename()));
+fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, dirname_from_compression: bool, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
+    if dirname_from_compression {
+        let mut zlib_outdir = outdir.to_path_buf();
+        let mut none_outdir = outdir.to_path_buf();
+
+        zlib_outdir.push("zlib");
+        none_outdir.push("none");
+
+        for record in records_iter {
+            let method = record.compression_method();
+            let outdir = if method == COMPR_NONE { &none_outdir } else { &zlib_outdir };
+
+            match pak.unpack(record, in_file, outdir) {
+                Ok(()) => {},
+                Err(error) => {
+                    return Err(error.with_path_if_none(record.filename()));
+                }
+            }
+        }
+    } else {
+        for record in records_iter {
+            match pak.unpack(record, in_file, outdir) {
+                Ok(()) => {},
+                Err(error) => {
+                    return Err(error.with_path_if_none(record.filename()));
+                }
             }
         }
     }
@@ -35,7 +55,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, records_iter: i
     Ok(())
 }
 
-pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, filter: &Option<Filter<'a>>) -> Result<()> {
+pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, dirname_from_compression: bool, filter: &Option<Filter<'a>>) -> Result<()> {
     let outdir = outdir.as_ref();
 
     if let Some(filter) = filter {
@@ -43,9 +63,9 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, filte
             .iter()
             .filter(|record| filter.contains(record.filename()));
 
-        unpack_iter(pak, in_file, outdir, records)?;
+        unpack_iter(pak, in_file, outdir, dirname_from_compression, records)?;
     } else {
-        unpack_iter(pak, in_file, outdir, pak.records().iter())?;
+        unpack_iter(pak, in_file, outdir, dirname_from_compression, pak.records().iter())?;
     }
     Ok(())
 }

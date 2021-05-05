@@ -251,6 +251,11 @@ fn run() -> Result<()> {
             .arg(arg_encoding())
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
+            .arg(Arg::with_name("dirname-from-compression")
+                .long("dirname-from-compression")
+                .short("d")
+                .takes_value(false)
+                .help("Put files that where compressed into separate folders."))
             .arg(Arg::with_name("outdir")
                 .long("outdir")
                 .short("o")
@@ -445,10 +450,11 @@ fn run() -> Result<()> {
         }
         ("unpack", Some(args)) => {
             let outdir = args.value_of("outdir").unwrap();
-            let null_separated        = args.is_present("print0");
-            let ignore_magic          = args.is_present("ignore-magic");
-            let check_integrity       = args.is_present("check-integrity");
-            let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let null_separated           = args.is_present("print0");
+            let ignore_magic             = args.is_present("ignore-magic");
+            let check_integrity          = args.is_present("check-integrity");
+            let ignore_null_checksums    = args.is_present("ignore-null-checksums");
+            let dirname_from_compression = args.is_present("dirname-from-compression");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let filter = get_filter(args);
@@ -484,7 +490,7 @@ fn run() -> Result<()> {
 
             drop(reader);
 
-            unpack(&pak, &mut file, outdir, &filter)?;
+            unpack(&pak, &mut file, outdir, dirname_from_compression, &filter)?;
         }
         ("pack", Some(args)) => {
             let mount_point = args.value_of("mount-point");
