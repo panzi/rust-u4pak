@@ -13,14 +13,14 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{convert::TryFrom, fs::File, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
-use std::fs::OpenOptions;
+use std::{convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::fs::{OpenOptions, File};
 
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
 use flate2::{Compression, write::ZlibEncoder};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::parse_pak_path, walkdir::walkdir};
+use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -31,16 +31,16 @@ use crate::encode::Encode;
 
 pub const COMPR_DEFAULT: u32 = u32::MAX;
 
-pub struct PackPath<'a> {
+pub struct PackPath {
     pub compression_method: u32,
     pub compression_block_size: Option<NonZeroU32>,
     pub compression_level: Option<NonZeroU32>,
-    pub filename: &'a str,
-    pub rename: Option<&'a str>,
+    pub filename: String,
+    pub rename: Option<String>,
 }
 
-impl<'a> PackPath<'a> {
-    pub fn new(filename: &'a str) -> Self {
+impl PackPath {
+    pub fn new(filename: String) -> Self {
         Self {
             compression_method: COMPR_DEFAULT,
             compression_block_size: None,
@@ -50,29 +50,56 @@ impl<'a> PackPath<'a> {
         }
     }
 
-    pub fn compressed(filename: &'a str, compression_method: u32, compression_block_size: Option<NonZeroU32>, compression_level: Option<NonZeroU32>) -> Result<Self> {
-        match compression_method {
-            self::COMPR_NONE | self::COMPR_ZLIB | self::COMPR_DEFAULT => {}
-            _ => return Err(Error::new(
-                format!("unsupported compression method: {} ({})",
-                    compression_method_name(compression_method), compression_method)).
-                with_path(filename))
+    #[inline]
+    pub fn read_from_path(path: impl AsRef<Path>) -> Result<Vec<PackPath>> {
+        match File::open(&path) {
+            Ok(mut file) => match Self::read_from_file(&mut file) {
+                Ok(res) => Ok(res),
+                Err(error) => Err(error.with_path_if_none(path))
+            },
+            Err(error) => Err(Error::io_with_path(error, path))
         }
+    }
 
-        Ok(Self {
-            compression_method,
-            compression_block_size,
-            compression_level,
-            filename,
-            rename: None,
-        })
+    #[inline]
+    pub fn read_from_file(file: &mut File) -> Result<Vec<PackPath>> {
+        Self::read_from_reader(BufReader::new(file))
+    }
+
+    #[inline]
+    pub fn read_from_reader(mut reader: impl BufRead) -> Result<Vec<PackPath>> {
+        let mut paths = Vec::new();
+        let mut lineno = 1usize;
+        loop {
+            let mut line = String::new();
+            let count = reader.read_line(&mut line)?;
+
+            if count == 0 {
+                break;
+            }
+
+            let line = line.trim();
+
+            if !line.starts_with('#') {
+                let path = match line.try_into() {
+                    Ok(path) => path,
+                    Err(error) =>
+                        return Err(Error::new(format!(":{}: {}", lineno, error)))
+                };
+
+                paths.push(path);
+            }
+
+            lineno += 1;
+        }
+        Ok(paths)
     }
 }
 
-impl<'a> TryFrom<&'a str> for PackPath<'a> {
+impl TryFrom<&str> for PackPath {
     type Error = crate::result::Error;
 
-    fn try_from(path_spec: &'a str) -> std::result::Result<Self, Self::Error> {
+    fn try_from(path_spec: &str) -> std::result::Result<Self, Self::Error> {
         // :zlib,level=5,block_size=512,rename=egg/spam.txt:/foo/bar/baz.txt
         if path_spec.starts_with(':') {
             if let Some(index) = path_spec[1..].find(':') {
@@ -99,9 +126,9 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                             if value.eq_ignore_ascii_case("default") {
                                 compression_block_size = Some(DEFAULT_BLOCK_SIZE);
                             } else {
-                                match value.parse() {
-                                    Ok(block_size) if block_size > 0 => {
-                                        compression_block_size = NonZeroU32::new(block_size);
+                                match parse_size(value) {
+                                    Ok(block_size) if block_size > 0 && block_size <= u32::MAX as usize => {
+                                        compression_block_size = NonZeroU32::new(block_size as u32);
                                     }
                                     _ => {
                                         return Err(Error::new(format!(
@@ -111,7 +138,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                                 }
                             }
                         } else if key.eq_ignore_ascii_case("rename") {
-                            rename = Some(value);
+                            rename = Some(value.to_string());
                         } else {
                             return Err(Error::new(format!(
                                 "illegal path specification, unhandeled parameter {:?} in: {:?}",
@@ -128,7 +155,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                     compression_block_size,
                     compression_level,
                     compression_method,
-                    filename,
+                    filename: filename.to_string(),
                     rename,
                 });
             } else {
@@ -137,7 +164,7 @@ impl<'a> TryFrom<&'a str> for PackPath<'a> {
                     path_spec)));
             }
         } else {
-            return Ok(Self::new(path_spec));
+            return Ok(Self::new(path_spec.to_string()));
         }
     }
 }
@@ -224,13 +251,13 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
         if options.version < 2 && compression_method != COMPR_NONE {
             return Err(Error::new("Compression is only supported startig with version 2".to_string())
-                .with_path(path.filename));
+                .with_path(&path.filename));
         }
 
         let source_path: PathBuf;
-        let filename = if let Some(filename) = path.rename {
-            source_path = path.filename.into();
-            parse_pak_path(filename).collect::<Vec<_>>()
+        let filename = if let Some(filename) = &path.rename {
+            source_path = (&path.filename).into();
+            parse_pak_path(&filename).collect::<Vec<_>>()
         } else {
             #[cfg(target_os = "windows")]
             let filename = path.filename

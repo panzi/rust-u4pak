@@ -52,7 +52,7 @@ pub use pack::{pack, PackOptions};
 
 pub mod walkdir;
 
-use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}};
+use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, util::parse_size};
 
 pub mod io;
 
@@ -496,7 +496,15 @@ fn run() -> Result<()> {
             let mount_point = args.value_of("mount-point");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let version = args.value_of("version").unwrap().parse()?;
-            let compression_block_size = args.value_of("compression-block-size").unwrap().parse()?;
+            let compression_block_size = parse_size(args.value_of("compression-block-size").unwrap())?;
+            if compression_block_size > u32::MAX as usize {
+                return Err(Error::new(format!("--compression-block-size too big: {}", compression_block_size)));
+            }
+            let compression_block_size = if let Some(value) = NonZeroU32::new(compression_block_size as u32) {
+                value
+            } else {
+                return Err(Error::new("--compression-block-size cannot be 0".to_string()));
+            };
             let compression_method = parse_compression_method(args.value_of("compression-method").unwrap())?;
             let compression_level = parse_compression_level(args.value_of("compression-level").unwrap())?;
             let path = args.value_of("package").unwrap();
@@ -504,7 +512,13 @@ fn run() -> Result<()> {
                 let mut paths = Vec::<PackPath>::new();
 
                 for path in path_strs {
-                    paths.push(path.try_into()?);
+                    if path.starts_with('@') {
+                        // TODO: maybe also read other arguments from file? (in particular mount_point)
+                        let path = &path[1..];
+                        paths.extend(PackPath::read_from_path(path)?.into_iter());
+                    } else {
+                        paths.push(path.try_into()?);
+                    }
                 }
 
                 paths
