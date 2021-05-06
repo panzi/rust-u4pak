@@ -15,6 +15,8 @@
 
 use std::path::{PathBuf, Path};
 
+use crossbeam_channel::SendError;
+
 #[derive(Debug)]
 pub enum ErrorType {
     IO(std::io::Error),
@@ -170,6 +172,13 @@ impl From<flate2::DecompressError> for Error {
     fn from(error: flate2::DecompressError) -> Self {
         Error::new(error.to_string())
     }
+}
+
+impl From<SendError<Result<(crate::Record, Vec<u8>)>>> for Error {
+    fn from(error: SendError<Result<(crate::Record, Vec<u8>)>>) -> Self {
+        Error::new(error.to_string())
+    }
+
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

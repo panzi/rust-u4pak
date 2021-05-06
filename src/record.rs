@@ -331,6 +331,18 @@ impl Record {
 
         buf
     }
+
+    pub(crate) fn move_to(&mut self, version: u32, new_offset: u64) {
+        if version < 7 {
+            if let Some(blocks) = &mut self.compression_blocks {
+                for block in blocks {
+                    block.start_offset = (block.start_offset - self.offset) + new_offset;
+                    block.end_offset   = (block.end_offset   - self.offset) + new_offset
+                }
+            }
+        }
+        self.offset = new_offset;
+    }
 }
 
 impl AsRef<Record> for Record {

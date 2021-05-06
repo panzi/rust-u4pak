@@ -16,6 +16,8 @@
 use std::{convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::{OpenOptions, File};
 
+use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_utils::thread;
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
 use flate2::{Compression, write::ZlibEncoder};
@@ -31,6 +33,7 @@ use crate::encode::Encode;
 
 pub const COMPR_DEFAULT: u32 = u32::MAX;
 
+#[derive(Debug, Clone)]
 pub struct PackPath {
     pub compression_method: u32,
     pub compression_block_size: Option<NonZeroU32>,
@@ -204,8 +207,6 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         }
     };
 
-    let compression_level = Compression::new(options.compression_level.get());
-
     match options.compression_method {
         self::COMPR_NONE | self::COMPR_ZLIB => {}
         _ => return Err(Error::new(
@@ -223,299 +224,140 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             Ok(file) => file,
             Err(error) => return Err(Error::io_with_path(error, pak_path))
         };
-    let mut writer = BufWriter::new(&mut out_file);
-
-    let mut hasher = Sha1Hasher::new();
-    let mut buffer = vec![0u8; BUFFER_SIZE];
-    let mut out_buffer = Vec::new();
 
     let mut records = Vec::new();
+    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+    let mut writer = BufWriter::new(&mut out_file);
+
     let mut data_size = 0u64;
+    let thread_count = num_cpus::get(); // TODO: also get from arguments
 
-    let base_header_size = match options.version {
-        1 => V1_RECORD_HEADER_SIZE,
-        2 => V2_RECORD_HEADER_SIZE,
-        3 => V3_RECORD_HEADER_SIZE,
-        _ => {
-            panic!("unsupported version: {}", options.version)
-        }
-    };
-    let mut header_buffer = vec![0u8; base_header_size as usize];
+    let thread_result = thread::scope::<_, Result<()>>(|scope| {
+        let (work_sender, work_receiver) = unbounded();
+        let (result_sender, result_receiver) = unbounded();
 
-    for path in paths {
-        let compression_method = if path.compression_method == COMPR_DEFAULT {
-            options.compression_method
-        } else {
-            path.compression_method
-        };
+        for _ in 0..thread_count {
+            let work_receiver = work_receiver.clone();
+            let result_sender = result_sender.clone();
 
-        if options.version < 2 && compression_method != COMPR_NONE {
-            return Err(Error::new("Compression is only supported startig with version 2".to_string())
-                .with_path(&path.filename));
+            scope.spawn(|_| {
+                if let Err(error) = worker_proc(&options, work_receiver, result_sender) {
+                    eprintln!("error in worker thread: {}", error);
+                }
+            });
         }
 
-        let source_path: PathBuf;
-        let filename = if let Some(filename) = &path.rename {
-            source_path = (&path.filename).into();
-            parse_pak_path(&filename).collect::<Vec<_>>()
-        } else {
-            #[cfg(target_os = "windows")]
-            let filename = path.filename
-                .trim_end_matches(|ch| ch == '/' || ch == '\\')
-                .split(|ch| ch == '/' || ch == '\\')
-                .filter(|comp| !comp.is_empty())
-                .collect::<Vec<_>>();
+        drop(work_receiver);
+        drop(result_sender);
 
-            #[cfg(not(target_os = "windows"))]
-            let filename = path.filename
-                .trim_end_matches('/')
-                .split('/')
-                .filter(|comp| !comp.is_empty())
-                .collect::<Vec<_>>();
-
-            source_path = filename.iter().collect();
-            filename
-        };
-
-        let component_count = source_path.components().count();
-
-        let mut handle_entry = |file_path: &Path| -> Result<()> {
-            let offset = data_size;
-            let compression_blocks;
-            let mut compression_block_size = 0u32;
-            let mut size;
-
-            let mut in_file = match File::open(&file_path) {
-                Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, file_path))
-            };
-
-            let metadata = match in_file.metadata() {
-                Ok(metadata) => metadata,
-                Err(error) => return Err(Error::io_with_path(error, file_path))
-            };
-
-            let uncompressed_size = metadata.len();
-
-            let timestamp = if options.version == 1 {
-                let created = match metadata.created() {
-                    Ok(created) => created,
-                    Err(error) => return Err(Error::io_with_path(error, file_path))
-                };
-                let timestamp = match created.duration_since(UNIX_EPOCH) {
-                    Ok(timestamp) => timestamp,
-                    Err(error) =>
-                        return Err(Error::new(error.to_string()).with_path(file_path))
-                };
-                Some(timestamp.as_secs())
+        for path in paths {
+            let compression_method = if path.compression_method == COMPR_DEFAULT {
+                options.compression_method
             } else {
-                None
+                path.compression_method
             };
 
-            hasher.reset();
-
-            match compression_method {
-                self::COMPR_NONE => {
-                    size = uncompressed_size;
-                    compression_blocks = None;
-
-                    writer.write_all(&header_buffer[..base_header_size as usize])?;
-                    data_size += base_header_size;
-
-                    let mut remaining = uncompressed_size as usize;
-                    {
-                        // buffer might be bigger than BUFFER_SIZE if any previous
-                        // compression_block_size is bigger than BUFFER_SIZE
-                        if buffer.len() < BUFFER_SIZE {
-                            buffer.resize(BUFFER_SIZE, 0);
-                        }
-                        let buffer = &mut buffer[..BUFFER_SIZE];
-                        while remaining >= BUFFER_SIZE {
-                            in_file.read_exact(buffer)?;
-                            writer.write_all(buffer)?;
-                            hasher.input(buffer);
-                            remaining -= BUFFER_SIZE;
-                        }
-                    }
-
-                    if remaining > 0 {
-                        let buffer = &mut buffer[..remaining];
-                        in_file.read_exact(buffer)?;
-                        writer.write_all(buffer)?;
-                        hasher.input(buffer);
-                    }
-                }
-                self::COMPR_ZLIB => {
-                    let compression_level = if let Some(compression_level) = path.compression_level {
-                        Compression::new(compression_level.get())
-                    } else {
-                        compression_level
-                    };
-                    if options.version <= 2 {
-                        writer.write_all(&header_buffer[..base_header_size as usize])?;
-                        data_size += base_header_size;
-
-                        if buffer.len() < uncompressed_size as usize {
-                            buffer.resize(uncompressed_size as usize, 0);
-                        }
-                        let buffer = &mut buffer[..uncompressed_size as usize];
-                        in_file.read_exact(buffer)?;
-
-                        out_buffer.clear();
-                        let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                        zlib.write_all(&buffer)?;
-                        zlib.finish()?;
-                        writer.write_all(&out_buffer)?;
-                        hasher.input(&out_buffer);
-
-                        size = out_buffer.len() as u64;
-
-                        compression_blocks = None;
-                    } else {
-                        size = 0u64;
-                        compression_block_size = path.compression_block_size
-                            .unwrap_or(options.compression_block_size)
-                            .get();
-
-                        if compression_block_size as u64 > uncompressed_size {
-                            compression_block_size = uncompressed_size as u32;
-                        }
-
-                        let mut header_size = base_header_size + 4;
-                        if uncompressed_size > 0 {
-                            header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
-                        }
-                        if header_buffer.len() < header_size as usize {
-                            header_buffer.resize(header_size as usize, 0);
-                        }
-                        writer.write_all(&header_buffer[..header_size as usize])?;
-                        data_size += header_size;
-
-                        if buffer.len() < compression_block_size as usize {
-                            buffer.resize(compression_block_size as usize, 0);
-                        }
-
-                        let buffer = &mut buffer[..compression_block_size as usize];
-                        let mut blocks = Vec::<CompressionBlock>::new();
-                        let mut remaining = uncompressed_size as usize;
-                        let mut start_offset = if options.version >= 7 { header_size } else { data_size };
-
-                        while remaining >= compression_block_size as usize {
-                            in_file.read_exact(buffer)?;
-
-                            out_buffer.clear();
-                            let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                            zlib.write_all(&buffer)?;
-                            zlib.finish()?;
-                            writer.write_all(&out_buffer)?;
-                            hasher.input(&out_buffer);
-
-                            let compressed_block_size = out_buffer.len() as u64;
-                            size += compressed_block_size;
-
-                            remaining -= compression_block_size as usize;
-                            let end_offset = start_offset + compressed_block_size;
-                            blocks.push(CompressionBlock {
-                                start_offset,
-                                end_offset,
-                            });
-                            start_offset = end_offset;
-                        }
-
-                        if remaining > 0 {
-                            let buffer = &mut buffer[..remaining];
-                            in_file.read_exact(buffer)?;
-
-                            out_buffer.clear();
-                            let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                            zlib.write_all(buffer)?;
-                            zlib.finish()?;
-                            writer.write_all(&out_buffer)?;
-                            hasher.input(&out_buffer);
-
-                            let compressed_block_size = out_buffer.len() as u64;
-                            size += compressed_block_size;
-
-                            let end_offset = start_offset + compressed_block_size;
-                            blocks.push(CompressionBlock {
-                                start_offset,
-                                end_offset,
-                            });
-                        }
-
-                        compression_blocks = Some(blocks);
-                    }
-                }
-                _ => {
-                    return Err(Error::new(
-                        format!("{}: unsupported compression method: {} ({})",
-                            path.filename, compression_method_name(compression_method), compression_method)).
-                        with_path(pak_path))
-                }
+            if options.version < 2 && compression_method != COMPR_NONE {
+                return Err(Error::new("Compression is only supported startig with version 2".to_string())
+                    .with_path(&path.filename));
             }
 
-            let mut sha1: Sha1 = [0u8; 20];
-            hasher.result(&mut sha1);
+            let source_path: PathBuf;
+            let filename = if let Some(filename) = &path.rename {
+                source_path = (&path.filename).into();
+                parse_pak_path(&filename).collect::<Vec<_>>()
+            } else {
+                #[cfg(target_os = "windows")]
+                let filename = path.filename
+                    .trim_end_matches(|ch| ch == '/' || ch == '\\')
+                    .split(|ch| ch == '/' || ch == '\\')
+                    .filter(|comp| !comp.is_empty())
+                    .collect::<Vec<_>>();
 
-            let mut pak_filename: Vec<String> = file_path.components()
-                .skip(component_count)
-                .map(|comp| comp.as_os_str().to_string_lossy().to_string())
-                .collect();
+                #[cfg(not(target_os = "windows"))]
+                let filename = path.filename
+                    .trim_end_matches('/')
+                    .split('/')
+                    .filter(|comp| !comp.is_empty())
+                    .collect::<Vec<_>>();
 
-            pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
+                source_path = filename.iter().collect();
+                filename
+            };
 
-            records.push(Record::new(
-                make_pak_path(pak_filename.iter()),
-                offset,
-                size,
-                uncompressed_size,
-                compression_method,
-                timestamp,
-                sha1,
-                compression_blocks,
-                false,
-                compression_block_size,
-            ));
+            let component_count = source_path.components().count();
 
-            data_size += size;
-
-            Ok(())
-        };
-
-        let metadata = match source_path.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) => return Err(Error::io_with_path(error, source_path))
-        };
-
-        if metadata.is_dir() {
-            let iter = match walkdir(&source_path) {
-                Ok(iter) => iter,
+            let metadata = match source_path.metadata() {
+                Ok(metadata) => metadata,
                 Err(error) => return Err(Error::io_with_path(error, source_path))
             };
-            for entry in iter {
-                let entry = match entry {
-                    Ok(entry) => entry,
+
+            if metadata.is_dir() {
+                let iter = match walkdir(&source_path) {
+                    Ok(iter) => iter,
                     Err(error) => return Err(Error::io_with_path(error, source_path))
                 };
-                match handle_entry(&entry.path()) {
+                for entry in iter {
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(error) => return Err(Error::io_with_path(error, source_path))
+                    };
+                    match work_sender.send(Work {
+                        component_count,
+                        compression_method,
+                        file_path: entry.path().clone(),
+                        filename: filename.clone(),
+                        path,
+                    }) {
+                        Ok(()) => {}
+                        Err(error) =>
+                            return Err(Error::new(error.to_string()).with_path(entry.path()))
+                    }
+                }
+            } else {
+                match work_sender.send(Work {
+                    component_count,
+                    compression_method,
+                    file_path: source_path.clone(),
+                    filename,
+                    path,
+                }) {
                     Ok(()) => {}
-                    Err(error) => return Err(error.with_path_if_none(entry.path()))
+                    Err(error) =>
+                        return Err(Error::new(error.to_string()).with_path(source_path))
                 }
             }
-        } else {
-            match handle_entry(&source_path) {
-                Ok(()) => {}
-                Err(error) => return Err(error.with_path_if_none(source_path))
-            }
         }
+
+        drop(work_sender);
+
+        while let Ok(result) = result_receiver.recv() {
+            let (mut record, mut data) = result?;
+            record.move_to(options.version, data_size);
+
+            buffer.clear();
+            write_record_inline(&record, &mut buffer)?;
+
+            data.splice(0..buffer.len(), buffer.iter().cloned());
+
+            writer.write_all(&data)?;
+            data_size += data.len() as u64;
+            records.push(record);
+        }
+
+        drop(result_receiver);
+
+        Ok(())
+    });
+
+    match thread_result {
+        Err(error) => {
+            return Err(Error::new(format!("threading error: {:?}", error)).with_path(pak_path));
+        }
+        Ok(result) => result?
     }
 
     let index_offset = data_size;
-
-    for record in &records {
-        writer.seek(SeekFrom::Start(record.offset()))?;
-        write_record_inline(record, &mut writer)?;
-    }
 
     writer.seek(SeekFrom::Start(index_offset))?;
 
@@ -523,7 +365,8 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     let mount_pount = options.mount_point.unwrap_or("");
 
-    hasher.reset();
+    let mut hasher = Sha1Hasher::new();
+
     buffer.clear();
 
     write_path(&mut buffer, mount_pount, options.encoding)?;
@@ -627,5 +470,244 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
             writer.write_all(&bytes)?;
         }
     }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Work<'a> {
+    filename: Vec<&'a str>,
+    file_path: PathBuf,
+    path: &'a PackPath,
+    compression_method: u32,
+    component_count: usize,
+}
+
+fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_channel: Sender<Result<(Record, Vec<u8>)>>) -> Result<()> {
+    let mut hasher = Sha1Hasher::new();
+    let mut buffer = vec![0u8; BUFFER_SIZE];
+    let mut out_buffer = Vec::new();
+
+    let compression_level = Compression::new(options.compression_level.get());
+
+    let base_header_size = match options.version {
+        1 => V1_RECORD_HEADER_SIZE,
+        2 => V2_RECORD_HEADER_SIZE,
+        3 => V3_RECORD_HEADER_SIZE,
+        _ => {
+            panic!("unsupported version: {}", options.version)
+        }
+    };
+    let mut header_buffer = vec![0u8; base_header_size as usize];
+
+    while let Ok(Work {filename, file_path, path, compression_method, component_count}) = work_channel.recv() {
+        let mut data = Vec::new();
+        let offset = 0;
+        let compression_blocks;
+        let mut compression_block_size = 0u32;
+        let mut size;
+
+        let mut in_file = match File::open(&file_path) {
+            Ok(file) => file,
+            Err(error) => {
+                result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                break;
+            }
+        };
+
+        let metadata = match in_file.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                break;
+            }
+        };
+
+        let uncompressed_size = metadata.len();
+
+        let timestamp = if options.version == 1 {
+            let created = match metadata.created() {
+                Ok(created) => created,
+                Err(error) => {
+                    result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                    break;
+                }
+            };
+            let timestamp = match created.duration_since(UNIX_EPOCH) {
+                Ok(timestamp) => timestamp,
+                Err(error) => {
+                    result_channel.send(Err(Error::new(error.to_string()).with_path(file_path)))?;
+                    break;
+                }
+            };
+            Some(timestamp.as_secs())
+        } else {
+            None
+        };
+
+        hasher.reset();
+
+        match compression_method {
+            self::COMPR_NONE => {
+                size = uncompressed_size;
+                compression_blocks = None;
+
+                data.write_all(&header_buffer[..base_header_size as usize])?;
+
+                let mut remaining = uncompressed_size as usize;
+                {
+                    // buffer might be bigger than BUFFER_SIZE if any previous
+                    // compression_block_size is bigger than BUFFER_SIZE
+                    if buffer.len() < BUFFER_SIZE {
+                        buffer.resize(BUFFER_SIZE, 0);
+                    }
+                    let buffer = &mut buffer[..BUFFER_SIZE];
+                    while remaining >= BUFFER_SIZE {
+                        in_file.read_exact(buffer)?;
+                        data.write_all(buffer)?;
+                        hasher.input(buffer);
+                        remaining -= BUFFER_SIZE;
+                    }
+                }
+
+                if remaining > 0 {
+                    let buffer = &mut buffer[..remaining];
+                    in_file.read_exact(buffer)?;
+                    data.write_all(buffer)?;
+                    hasher.input(buffer);
+                }
+            }
+            self::COMPR_ZLIB => {
+                let compression_level = if let Some(compression_level) = path.compression_level {
+                    Compression::new(compression_level.get())
+                } else {
+                    compression_level
+                };
+                if options.version <= 2 {
+                    data.write_all(&header_buffer[..base_header_size as usize])?;
+
+                    if buffer.len() < uncompressed_size as usize {
+                        buffer.resize(uncompressed_size as usize, 0);
+                    }
+                    let buffer = &mut buffer[..uncompressed_size as usize];
+                    in_file.read_exact(buffer)?;
+
+                    out_buffer.clear();
+                    let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
+                    zlib.write_all(&buffer)?;
+                    zlib.finish()?;
+                    data.write_all(&out_buffer)?;
+                    hasher.input(&out_buffer);
+
+                    size = out_buffer.len() as u64;
+
+                    compression_blocks = None;
+                } else {
+                    size = 0u64;
+                    compression_block_size = path.compression_block_size
+                        .unwrap_or(options.compression_block_size)
+                        .get();
+
+                    if compression_block_size as u64 > uncompressed_size {
+                        compression_block_size = uncompressed_size as u32;
+                    }
+
+                    let mut header_size = base_header_size + 4;
+                    if uncompressed_size > 0 {
+                        header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
+                    }
+                    if header_buffer.len() < header_size as usize {
+                        header_buffer.resize(header_size as usize, 0);
+                    }
+                    data.write_all(&header_buffer[..header_size as usize])?;
+
+                    if buffer.len() < compression_block_size as usize {
+                        buffer.resize(compression_block_size as usize, 0);
+                    }
+
+                    let buffer = &mut buffer[..compression_block_size as usize];
+                    let mut blocks = Vec::<CompressionBlock>::new();
+                    let mut remaining = uncompressed_size as usize;
+                    let mut start_offset = header_size;
+
+                    while remaining >= compression_block_size as usize {
+                        in_file.read_exact(buffer)?;
+
+                        out_buffer.clear();
+                        let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
+                        zlib.write_all(&buffer)?;
+                        zlib.finish()?;
+                        data.write_all(&out_buffer)?;
+                        hasher.input(&out_buffer);
+
+                        let compressed_block_size = out_buffer.len() as u64;
+                        size += compressed_block_size;
+
+                        remaining -= compression_block_size as usize;
+                        let end_offset = start_offset + compressed_block_size;
+                        blocks.push(CompressionBlock {
+                            start_offset,
+                            end_offset,
+                        });
+                        start_offset = end_offset;
+                    }
+
+                    if remaining > 0 {
+                        let buffer = &mut buffer[..remaining];
+                        in_file.read_exact(buffer)?;
+
+                        out_buffer.clear();
+                        let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
+                        zlib.write_all(buffer)?;
+                        zlib.finish()?;
+                        data.write_all(&out_buffer)?;
+                        hasher.input(&out_buffer);
+
+                        let compressed_block_size = out_buffer.len() as u64;
+                        size += compressed_block_size;
+
+                        let end_offset = start_offset + compressed_block_size;
+                        blocks.push(CompressionBlock {
+                            start_offset,
+                            end_offset,
+                        });
+                    }
+
+                    compression_blocks = Some(blocks);
+                }
+            }
+            _ => {
+                result_channel.send(Err(Error::new(
+                    format!("{}: unsupported compression method: {} ({})",
+                        path.filename, compression_method_name(compression_method), compression_method))))?;
+                break;
+            }
+        }
+
+        let mut sha1: Sha1 = [0u8; 20];
+        hasher.result(&mut sha1);
+
+        let mut pak_filename: Vec<String> = file_path.components()
+            .skip(component_count)
+            .map(|comp| comp.as_os_str().to_string_lossy().to_string())
+            .collect();
+
+        pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
+        
+        let record = Record::new(
+            make_pak_path(pak_filename.iter()),
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            timestamp,
+            sha1,
+            compression_blocks,
+            false,
+            compression_block_size,
+        );
+
+        result_channel.send(Ok((record, data)))?;
+    }
+
     Ok(())
 }
