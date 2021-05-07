@@ -17,5 +17,6 @@ TODO
 * [x] list
 * [x] check
 * [x] unpack
-* [ ] pack
+* [x] pack
+* [ ] maybe read arguments from text file for Windows users that can't handle a terminal?
 * [ ] mount
