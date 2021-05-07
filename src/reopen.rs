@@ -100,13 +100,13 @@ pub fn get_file_path(file: &File) -> std::io::Result<PathBuf> {
 
     if size == 0 {
         return Err(std::io::Error::last_os_error());
-    } else if size as usize > buf.len() {
+    } else if size as usize >= buf.len() {
         buf.resize(size as usize + 1, 0);
         let size = unsafe { windows::GetFinalPathNameByHandleW(hFile, buf.as_mut_ptr(), buf.len() as windows::DWORD, windows::FILE_NAME_NORMALIZED) };
 
         if size == 0 {
             return Err(std::io::Error::last_os_error());
-        } else if size as usize > buf.len() {
+        } else if size as usize >= buf.len() {
             return Err(std::io::Error::from_raw_os_error(windows::ERROR_NOT_ENOUGH_MEMORY));
         } else {
             buf.truncate(size as usize);
