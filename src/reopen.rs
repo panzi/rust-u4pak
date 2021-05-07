@@ -115,6 +115,10 @@ pub fn get_file_path(file: &File) -> std::io::Result<PathBuf> {
         buf.truncate(size as usize + 1);
     }
 
+    if let Some(index) = buf.iter().position(|&ch| ch == 0) {
+        buf.truncate(index);
+    }
+
     let path = OsString::from_wide(&buf[..]);
     let path = PathBuf::from(path);
 
