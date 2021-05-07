@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
+#[derive(Debug)]
 pub struct Filter<'a> {
     nodes: std::collections::HashMap<&'a str, Filter<'a>>,
     included: bool,

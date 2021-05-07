@@ -174,11 +174,10 @@ impl From<flate2::DecompressError> for Error {
     }
 }
 
-impl From<SendError<Result<(crate::Record, Vec<u8>)>>> for Error {
-    fn from(error: SendError<Result<(crate::Record, Vec<u8>)>>) -> Self {
+impl<T: Sized> From<SendError<Result<T>>> for Error {
+    fn from(error: SendError<Result<T>>) -> Self {
         Error::new(error.to_string())
     }
-
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

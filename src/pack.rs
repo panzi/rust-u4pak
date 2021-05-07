@@ -172,7 +172,7 @@ impl TryFrom<&str> for PackPath {
     }
 }
 
-
+#[derive(Debug)]
 pub struct PackOptions<'a> {
     pub version: u32,
     pub mount_point: Option<&'a str>,
@@ -180,6 +180,8 @@ pub struct PackOptions<'a> {
     pub compression_block_size: NonZeroU32,
     pub compression_level: NonZeroU32,
     pub encoding: Encoding,
+    pub verbose: bool,
+    pub null_separated: bool,
 }
 
 impl Default for PackOptions<'_> {
@@ -191,6 +193,8 @@ impl Default for PackOptions<'_> {
             compression_block_size: DEFAULT_BLOCK_SIZE,
             compression_level: DEFAULT_COMPRESSION_LEVEL,
             encoding: Encoding::default(),
+            verbose: false,
+            null_separated: false,
         }
     }
 }
@@ -331,6 +335,8 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
         drop(work_sender);
 
+        let seperator = if options.null_separated { '\0' } else { '\n' };
+
         while let Ok(result) = result_receiver.recv() {
             let (mut record, mut data) = result?;
             record.move_to(options.version, data_size);
@@ -342,6 +348,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
             writer.write_all(&data)?;
             data_size += data.len() as u64;
+
+            if options.verbose {
+                print!("{}{}", record.filename(), seperator);
+            }
+
             records.push(record);
         }
 

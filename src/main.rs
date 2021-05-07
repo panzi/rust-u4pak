@@ -52,9 +52,11 @@ pub use pack::{pack, PackOptions};
 
 pub mod walkdir;
 
-use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, util::parse_size};
+use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
 
 pub mod io;
+
+pub mod reopen;
 
 fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
     if let Some(paths) = args.values_of("paths") {
@@ -127,6 +129,13 @@ fn arg_paths<'a, 'b>() -> Arg<'a, 'b> {
         .help("If given, only consider these files from the package.")
 }
 
+fn arg_verbose<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("verbose")
+        .long("verbose")
+        .short("v")
+        .takes_value(false)
+        .help("Verbose output.")
+}
 fn arg_check_integrity<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("check-integrity")
         .long("check-integrity")
@@ -251,6 +260,7 @@ fn run() -> Result<()> {
             .arg(arg_encoding())
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
+            .arg(arg_verbose())
             .arg(Arg::with_name("dirname-from-compression")
                 .long("dirname-from-compression")
                 .short("d")
@@ -294,6 +304,8 @@ fn run() -> Result<()> {
                 .takes_value(true)
                 .default_value("default"))
             .arg(arg_encoding())
+            .arg(arg_print0())
+            .arg(arg_verbose())
             .arg(arg_package())
             .arg(Arg::with_name("paths")
                 .index(2)
@@ -451,6 +463,7 @@ fn run() -> Result<()> {
         ("unpack", Some(args)) => {
             let outdir = args.value_of("outdir").unwrap();
             let null_separated           = args.is_present("print0");
+            let verbose                  = args.is_present("verbose");
             let ignore_magic             = args.is_present("ignore-magic");
             let check_integrity          = args.is_present("check-integrity");
             let ignore_null_checksums    = args.is_present("ignore-null-checksums");
@@ -490,9 +503,16 @@ fn run() -> Result<()> {
 
             drop(reader);
 
-            unpack(&pak, &mut file, outdir, dirname_from_compression, &filter)?;
+            unpack(&pak, &mut file, outdir, UnpackOptions {
+                dirname_from_compression,
+                verbose,
+                null_separated,
+                filter,
+            })?;
         }
         ("pack", Some(args)) => {
+            let null_separated = args.is_present("print0");
+            let verbose        = args.is_present("verbose");
             let mount_point = args.value_of("mount-point");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let version = args.value_of("version").unwrap().parse()?;
@@ -533,6 +553,8 @@ fn run() -> Result<()> {
                 compression_method,
                 compression_block_size,
                 compression_level,
+                verbose,
+                null_separated,
             })?;
         }
         #[cfg(target_os = "linux")]
