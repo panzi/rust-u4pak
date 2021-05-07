@@ -109,14 +109,10 @@ pub fn get_file_path(file: &File) -> std::io::Result<PathBuf> {
         } else if size as usize > buf.len() {
             return Err(std::io::Error::from_raw_os_error(windows::ERROR_NOT_ENOUGH_MEMORY));
         } else {
-            buf.truncate(size as usize + 1);
+            buf.truncate(size as usize);
         }
     } else {
-        buf.truncate(size as usize + 1);
-    }
-
-    if let Some(index) = buf.iter().position(|&ch| ch == 0) {
-        buf.truncate(index);
+        buf.truncate(size as usize);
     }
 
     let path = OsString::from_wide(&buf[..]);
