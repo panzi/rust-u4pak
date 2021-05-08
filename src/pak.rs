@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashSet, convert::TryFrom, fmt::Display, num::NonZeroU32, path::Path};
+use std::{collections::HashSet, convert::TryFrom, fmt::Display, num::{NonZeroU32, NonZeroUsize}, path::Path, usize};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader, stderr};
 
@@ -190,6 +190,7 @@ pub struct CheckOptions {
     pub ignore_null_checksums: bool,
     pub null_separated: bool,
     pub verbose: bool,
+    pub thread_count: NonZeroUsize,
 }
 
 impl Default for CheckOptions {
@@ -199,6 +200,7 @@ impl Default for CheckOptions {
             ignore_null_checksums: false,
             null_separated: false,
             verbose: false,
+            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
 }
@@ -360,7 +362,7 @@ impl Pak {
     pub fn check_integrity_of<'a, I>(&self, records: I, in_file: &mut File, options: CheckOptions) -> Result<usize>
     where
         I: std::iter::Iterator<Item=&'a Record> {
-        let CheckOptions { abort_on_error, ignore_null_checksums, null_separated, verbose} = options;
+        let CheckOptions { abort_on_error, ignore_null_checksums, null_separated, verbose, thread_count } = options;
         let mut hasher = Sha1Hasher::new();
         let mut error_count = 0usize;
         let mut filenames = HashSet::new();
@@ -375,7 +377,6 @@ impl Pak {
             }
         }
 
-        let thread_count = num_cpus::get(); // TODO: also get from arguments
         let version = self.version;
         let read_record = match version {
             1 => Record::read_v1,
@@ -390,7 +391,7 @@ impl Pak {
             let (work_sender, work_receiver) = unbounded::<&Record>();
             let (result_sender, result_receiver) = unbounded::<Result<&str>>();
 
-            for _ in 0..thread_count {
+            for _ in 0..thread_count.get() {
                 let work_receiver = work_receiver.clone();
                 let result_sender = result_sender.clone();
                 let in_file = File::open(&pak_path)?;

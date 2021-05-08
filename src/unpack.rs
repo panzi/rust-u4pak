@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fs::OpenOptions, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
+use std::{fs::OpenOptions, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -32,6 +32,7 @@ pub struct UnpackOptions<'a> {
     pub verbose: bool,
     pub null_separated: bool,
     pub filter: Option<Filter<'a>>,
+    pub thread_count: NonZeroUsize,
 }
 
 impl Default for UnpackOptions<'_> {
@@ -41,13 +42,13 @@ impl Default for UnpackOptions<'_> {
             verbose: false,
             null_separated: false,
             filter: None,
+            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
 }
 
 #[inline]
 fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a UnpackOptions<'a>, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
-    let thread_count = num_cpus::get(); // TODO: also get from arguments
     let version = pak.version();
 
     let dirnames = if options.dirname_from_compression {
@@ -68,7 +69,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
         let (work_sender, work_receiver) = unbounded();
         let (result_sender, result_receiver) = unbounded();
 
-        for _ in 0..thread_count {
+        for _ in 0..options.thread_count.get() {
             let work_receiver = work_receiver.clone();
             let result_sender = result_sender.clone();
             let mut in_file = File::open(&pak_path)?;

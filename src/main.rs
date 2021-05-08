@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use clap::{Arg, App, SubCommand};
+use clap::{App, AppSettings, Arg, SubCommand};
 use pak::COMPR_NONE;
-use std::{convert::TryInto, io::stderr, num::NonZeroU32};
+use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
 use std::fs::File;
 
@@ -68,6 +68,24 @@ fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
     } else {
         None
     }
+}
+
+fn get_threads(args: &clap::ArgMatches) -> Result<NonZeroUsize> {
+    let threads = if let Some(threads) = args.value_of("threads") {
+        if threads.eq_ignore_ascii_case("auto") {
+            NonZeroUsize::new(num_cpus::get())
+        } else {
+            let threads = threads.parse()?;
+            if threads == 0 {
+                return Err(Error::new("thread count may not be 0".to_string()));
+            }
+            NonZeroUsize::new(threads)
+        }
+    } else {
+        NonZeroUsize::new(num_cpus::get())
+    };
+
+    Ok(threads.unwrap_or_else(|| NonZeroUsize::new(1).unwrap()))
 }
 
 pub fn parse_compression_method(value: &str) -> Result<u32> {
@@ -161,6 +179,16 @@ fn arg_encoding<'a, 'b>() -> Arg<'a, 'b> {
         .help("Use ENCODING to decode strings. Supported encodings: UTF-8, Latin1, ASCII")
 }
 
+fn arg_threads<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("threads")
+        .long("threads")
+        .short("t")
+        .takes_value(true)
+        .default_value("auto")
+        .value_name("COUNT")
+        .help("Number of threads to use.")
+}
+
 fn arg_force_version<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("force-version")
         .long("force-version")
@@ -193,6 +221,7 @@ fn run() -> Result<()> {
 
     let app = App::new("VPK - Valve Packages")
         .version("1.0.0")
+        .global_setting(AppSettings::VersionlessSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
     let app = app
@@ -239,6 +268,7 @@ fn run() -> Result<()> {
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
             .arg(arg_human_readable())
+            .arg(arg_threads())
             .arg(arg_package())
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("check")
@@ -249,6 +279,7 @@ fn run() -> Result<()> {
             .arg(arg_encoding())
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
+            .arg(arg_threads())
             .arg(arg_verbose())
             .arg(arg_package())
             .arg(arg_paths()))
@@ -261,6 +292,7 @@ fn run() -> Result<()> {
             .arg(arg_encoding())
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
+            .arg(arg_threads())
             .arg(arg_verbose())
             .arg(Arg::with_name("dirname-from-compression")
                 .long("dirname-from-compression")
@@ -306,6 +338,7 @@ fn run() -> Result<()> {
                 .default_value("default"))
             .arg(arg_encoding())
             .arg(arg_print0())
+            .arg(arg_threads())
             .arg(arg_verbose())
             .arg(arg_package())
             .arg(Arg::with_name("paths")
@@ -405,6 +438,7 @@ fn run() -> Result<()> {
                     ignore_null_checksums,
                     null_separated,
                     verbose: false,
+                    thread_count: get_threads(args)?,
                 };
                 if let Some(filter) = &filter {
                     let records = pak.records()
@@ -458,6 +492,7 @@ fn run() -> Result<()> {
                 ignore_null_checksums,
                 null_separated,
                 verbose,
+                thread_count: get_threads(args)?,
             };
 
             let error_count = if let Some(filter) = &filter {
@@ -488,6 +523,7 @@ fn run() -> Result<()> {
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let filter = get_filter(args);
+            let thread_count = get_threads(args)?;
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -515,6 +551,7 @@ fn run() -> Result<()> {
                     ignore_null_checksums,
                     null_separated,
                     verbose: false,
+                    thread_count,
                 };
                 if let Some(filter) = &filter {
                     let records = pak.records()
@@ -531,9 +568,11 @@ fn run() -> Result<()> {
                 verbose,
                 null_separated,
                 filter,
+                thread_count,
             })?;
         }
         ("pack", Some(args)) => {
+            let thread_count = get_threads(args)?;
             let null_separated = args.is_present("print0");
             let verbose        = args.is_present("verbose");
             let mount_point = args.value_of("mount-point");
@@ -578,6 +617,7 @@ fn run() -> Result<()> {
                 compression_level,
                 verbose,
                 null_separated,
+                thread_count,
             })?;
         }
         #[cfg(target_os = "linux")]

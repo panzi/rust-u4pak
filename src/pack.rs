@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{collections::HashMap, convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize}, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -182,6 +182,7 @@ pub struct PackOptions<'a> {
     pub encoding: Encoding,
     pub verbose: bool,
     pub null_separated: bool,
+    pub thread_count: NonZeroUsize,
 }
 
 impl Default for PackOptions<'_> {
@@ -195,6 +196,7 @@ impl Default for PackOptions<'_> {
             encoding: Encoding::default(),
             verbose: false,
             null_separated: false,
+            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
 }
@@ -234,14 +236,13 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     let mut writer = BufWriter::new(&mut out_file);
 
     let mut data_size = 0u64;
-    let thread_count = num_cpus::get(); // TODO: also get from arguments
 
     let thread_result = thread::scope::<_, Result<()>>(|scope| {
         let mut filenames = HashMap::new();
         let (work_sender, work_receiver) = unbounded();
         let (result_sender, result_receiver) = unbounded();
 
-        for _ in 0..thread_count {
+        for _ in 0..options.thread_count.get() {
             let work_receiver = work_receiver.clone();
             let result_sender = result_sender.clone();
 
