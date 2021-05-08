@@ -18,5 +18,6 @@ TODO
 * [x] check
 * [x] unpack
 * [x] pack
+* [x] multithreading
 * [ ] maybe read arguments from text file for Windows users that can't handle a terminal?
 * [ ] mount
