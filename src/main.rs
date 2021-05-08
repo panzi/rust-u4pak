@@ -52,7 +52,7 @@ pub use pack::{pack, PackOptions};
 
 pub mod walkdir;
 
-use crate::{pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
+use crate::{pack::PackPath, pak::{COMPR_ZLIB, CheckOptions, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
 
 pub mod io;
 
@@ -249,6 +249,7 @@ fn run() -> Result<()> {
             .arg(arg_encoding())
             .arg(arg_force_version())
             .arg(arg_ignore_null_checksums())
+            .arg(arg_verbose())
             .arg(arg_package())
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("unpack")
@@ -384,11 +385,11 @@ fn run() -> Result<()> {
                 None
             };
 
-            let file = match File::open(path) {
+            let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path))
             };
-            let mut reader = BufReader::new(file);
+            let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
                 ignore_magic,
@@ -396,14 +397,22 @@ fn run() -> Result<()> {
                 force_version,
             })?;
 
+            drop(reader);
+
             if check_integrity {
+                let options = CheckOptions {
+                    abort_on_error: true,
+                    ignore_null_checksums,
+                    null_separated,
+                    verbose: false,
+                };
                 if let Some(filter) = &filter {
                     let records = pak.records()
                         .iter()
                         .filter(|record| filter.contains(record.filename()));
-                    pak.check_integrity_of(records, &mut reader, true, ignore_null_checksums, null_separated)?;
+                    pak.check_integrity_of(records, &mut file, options)?;
                 } else {
-                    pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
+                    pak.check_integrity(&mut file, options)?;
                 }
             }
 
@@ -421,6 +430,7 @@ fn run() -> Result<()> {
             let null_separated        = args.is_present("print0");
             let ignore_magic          = args.is_present("ignore-magic");
             let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let verbose               = args.is_present("verbose");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let filter = get_filter(args);
@@ -431,11 +441,11 @@ fn run() -> Result<()> {
                 None
             };
 
-            let file = match File::open(path) {
+            let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path))
             };
-            let mut reader = BufReader::new(file);
+            let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
                 ignore_magic,
@@ -443,13 +453,20 @@ fn run() -> Result<()> {
                 force_version,
             })?;
 
+            let options = CheckOptions {
+                abort_on_error: true,
+                ignore_null_checksums,
+                null_separated,
+                verbose,
+            };
+
             let error_count = if let Some(filter) = &filter {
                 let records = pak.records()
                     .iter()
                     .filter(|record| filter.contains(record.filename()));
-                pak.check_integrity_of(records, &mut reader, false, ignore_null_checksums, null_separated)?
+                pak.check_integrity_of(records, &mut file, options)?
             } else {
-                pak.check_integrity(&mut reader, false, ignore_null_checksums, null_separated)?
+                pak.check_integrity(&mut file, options)?
             };
 
             let sep = if null_separated { '\0' } else { '\n' };
@@ -490,18 +507,24 @@ fn run() -> Result<()> {
                 force_version,
             })?;
 
+            drop(reader);
+
             if check_integrity {
+                let options = CheckOptions {
+                    abort_on_error: true,
+                    ignore_null_checksums,
+                    null_separated,
+                    verbose: false,
+                };
                 if let Some(filter) = &filter {
                     let records = pak.records()
                         .iter()
                         .filter(|record| filter.contains(record.filename()));
-                    pak.check_integrity_of(records, &mut reader, true, ignore_null_checksums, null_separated)?;
+                    pak.check_integrity_of(records, &mut file, options)?;
                 } else {
-                    pak.check_integrity(&mut reader, true, ignore_null_checksums, null_separated)?;
+                    pak.check_integrity(&mut file, options)?;
                 }
             }
-
-            drop(reader);
 
             unpack(&pak, &mut file, outdir, UnpackOptions {
                 dirname_from_compression,

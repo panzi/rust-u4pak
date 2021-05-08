@@ -112,35 +112,21 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
         #[cfg(target_family="unix")]
         let mut stdout = std::io::stdout();
 
-        #[cfg(target_family="unix")]
-        use std::os::unix::ffi::OsStrExt;
+        let linesep = if options.null_separated { '\0' } else { '\n' };
 
         while let Ok(result) = result_receiver.recv() {
             let path = result?;
             if options.verbose {
-                if options.null_separated {
-                    #[cfg(target_family="unix")]
-                    {
+                #[cfg(target_family="unix")]
+                {
+                    use std::os::unix::ffi::OsStrExt;
+                    let _ = stdout.write_all(path.as_os_str().as_bytes());
+                    let _ = stdout.write_all(&[linesep as u8]);
+                }
 
-                        let _ = stdout.write_all(path.as_os_str().as_bytes());
-                        let _ = stdout.write_all(&[0]);
-                    }
-
-                    #[cfg(not(target_family="unix"))]
-                    {
-                        print!("{}{}", path.to_string_lossy(), 0 as char);
-                    }
-                } else {
-                    #[cfg(target_family="unix")]
-                    {
-                        let _ = stdout.write_all(path.as_os_str().as_bytes());
-                        let _ = stdout.write_all(&[b'\n']);
-                    }
-
-                    #[cfg(not(target_family="unix"))]
-                    {
-                        println!("{}", path.to_string_lossy());
-                    }
+                #[cfg(not(target_family="unix"))]
+                {
+                    print!("{}{}", path.to_string_lossy(), linesep);
                 }
             }
         }

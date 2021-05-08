@@ -17,10 +17,12 @@ use std::{collections::HashSet, convert::TryFrom, fmt::Display, num::NonZeroU32,
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader, stderr};
 
+use crossbeam_channel::unbounded;
+use crossbeam_utils::thread;
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
 
-use crate::decode;
+use crate::{decode, reopen::Reopen};
 use crate::decode::Decode;
 use crate::{Record, Result, Error};
 
@@ -48,14 +50,29 @@ pub type Sha1 = [u8; 20];
 pub const NULL_SHA1: Sha1 = [0u8; 20];
 
 macro_rules! check_error {
-    ($error_count:ident, $abort_on_error:expr, $null_separated:expr, $($error:tt)*) => {
+    ($ok:expr, $result_sender:expr, $abort_on_error:expr, $error:expr) => {
         {
-            let error = $($error)*;
-            $error_count += 1;
-            if $abort_on_error {
-                return Err(error);
+            if let Err(_) = $result_sender.send(Err($error)) {
+                return;
             }
-            let _ = error.write_to(&mut stderr(), $null_separated);
+
+            if $abort_on_error {
+                return;
+            }
+
+            $ok = false;
+        }
+    };
+}
+
+macro_rules! io {
+    () => { Ok(()) };
+    ($expr:expr $(,)?) => { $expr };
+    ($expr:expr, $($tail:expr),* $(,)?) => {
+        if let Err(_error) = ($expr) {
+            Err(_error)
+        } else {
+            io!($($tail),*)
         }
     };
 }
@@ -140,6 +157,7 @@ impl TryFrom<&str> for Encoding {
     }
 }
 
+#[derive(Debug)]
 pub struct Pak {
     version: u32,
     index_offset: u64,
@@ -149,6 +167,7 @@ pub struct Pak {
     records: Vec<Record>,
 }
 
+#[derive(Debug)]
 pub struct Options {
     pub ignore_magic: bool,
     pub encoding: Encoding,
@@ -161,6 +180,25 @@ impl Default for Options {
             ignore_magic: false,
             encoding: Encoding::UTF8,
             force_version: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CheckOptions {
+    pub abort_on_error: bool,
+    pub ignore_null_checksums: bool,
+    pub null_separated: bool,
+    pub verbose: bool,
+}
+
+impl Default for CheckOptions {
+    fn default() -> Self {
+        Self {
+            abort_on_error: false,
+            ignore_null_checksums: false,
+            null_separated: false,
+            verbose: false,
         }
     }
 }
@@ -315,25 +353,29 @@ impl Pak {
     }
 
     #[inline]
-    pub fn check_integrity<R>(&self, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
-    where R: Read, R: Seek {
-        self.check_integrity_of(self.records.iter(), reader, abort_on_error, ignore_null_checksums, null_separated)
+    pub fn check_integrity(&self, in_file: &mut File, options: CheckOptions) -> Result<usize> {
+        self.check_integrity_of(self.records.iter(), in_file, options)
     }
 
-    pub fn check_integrity_of<'a, I, R>(&self, records: I, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
+    pub fn check_integrity_of<'a, I>(&self, records: I, in_file: &mut File, options: CheckOptions) -> Result<usize>
     where
-        I: std::iter::Iterator<Item=&'a Record>,
-        R: Read, R: Seek {
+        I: std::iter::Iterator<Item=&'a Record> {
+        let CheckOptions { abort_on_error, ignore_null_checksums, null_separated, verbose} = options;
         let mut hasher = Sha1Hasher::new();
-        let mut buffer = vec![0u8; BUFFER_SIZE];
         let mut error_count = 0usize;
-        let mut actual_digest = [0u8; 20];
         let mut filenames = HashSet::new();
+        let pak_path = in_file.path()?;
 
-        if let Err(error) = check_data(reader, "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut hasher, &mut buffer) {
-            check_error!(error_count, abort_on_error, null_separated, error);
+        if let Err(error) = check_data(&mut BufReader::new(in_file), "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut hasher, &mut vec![0u8; BUFFER_SIZE]) {
+            error_count += 1;
+            if abort_on_error {
+                return Err(error);
+            } else {
+                let _ = error.write_to(&mut stderr(), null_separated);
+            }
         }
 
+        let thread_count = num_cpus::get(); // TODO: also get from arguments
         let version = self.version;
         let read_record = match version {
             1 => Record::read_v1,
@@ -344,94 +386,165 @@ impl Pak {
             }
         };
 
-        for record in records {
-            if !filenames.insert(record.filename()) {
-                check_error!(error_count, abort_on_error, null_separated, Error::new(
-                    "filename not unique in archive".to_string()
-                ).with_path(record.filename()));
-            }
+        let thread_result = thread::scope::<_, Result<usize>>(|scope| {
+            let (work_sender, work_receiver) = unbounded::<&Record>();
+            let (result_sender, result_receiver) = unbounded::<Result<&str>>();
 
-            if !COMPR_METHODS.contains(&record.compression_method()) {
-                check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
-                    "unknown compression method: 0x{:02x}",
-                    record.compression_method(),
-                )).with_path(record.filename()));
-            }
+            for _ in 0..thread_count {
+                let work_receiver = work_receiver.clone();
+                let result_sender = result_sender.clone();
+                let in_file = File::open(&pak_path)?;
 
-            if record.compression_method() == COMPR_NONE && record.size() != record.uncompressed_size() {
-                check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
-                    "file is not compressed but compressed size ({}) differes from uncompressed size ({})",
-                    record.size(),
-                    record.uncompressed_size(),
-                )).with_path(record.filename()));
-            }
+                scope.spawn(move |_| {
+                    let mut reader = BufReader::new(in_file);
+                    let mut buffer = vec![0u8; BUFFER_SIZE];
+                    let mut actual_digest = [0u8; 20];
 
-            let offset = record.offset() + Self::header_size(self.version, record);
-            if offset + record.size() > self.index_offset {
-                check_error!(error_count, abort_on_error, null_separated, Error::new(
-                    "data bleeds into index".to_string()
-                ).with_path(record.filename()));
-            }
+                    while let Ok(record) = work_receiver.recv() {
+                        let mut ok = true;
 
-            if let Err(error) = reader.seek(SeekFrom::Start(record.offset())) {
-                check_error!(error_count, abort_on_error, null_separated,
-                    Error::io_with_path(error, record.filename()));
-            } else {
-                match read_record(reader, record.filename().to_string()) {
-                    Ok(other_record) => {
-                        if other_record.offset() != 0 {
-                            check_error!(error_count, abort_on_error, null_separated,
-                                Error::new(format!("data record offset field is not 0 but {}",
-                                        other_record.offset()))
-                                    .with_path(other_record.filename()));
+                        if !COMPR_METHODS.contains(&record.compression_method()) {
+                            check_error!(ok, result_sender, abort_on_error, Error::new(format!(
+                                "unknown compression method: 0x{:02x}",
+                                record.compression_method(),
+                            )).with_path(record.filename()));
                         }
 
-                        if !record.same_metadata(&other_record) {
-                            check_error!(error_count, abort_on_error, null_separated,
-                                Error::new(format!("metadata missmatch:\n{}",
-                                        record.metadata_diff(&other_record)))
-                                    .with_path(other_record.filename()));
+                        if record.compression_method() == COMPR_NONE && record.size() != record.uncompressed_size() {
+                            check_error!(ok, result_sender, abort_on_error, Error::new(format!(
+                                "file is not compressed but compressed size ({}) differes from uncompressed size ({})",
+                                record.size(),
+                                record.uncompressed_size(),
+                            )).with_path(record.filename()));
+                        }
+
+                        let offset = record.offset() + Self::header_size(self.version, record);
+                        if offset + record.size() > self.index_offset {
+                            check_error!(ok, result_sender, abort_on_error, Error::new(
+                                "data bleeds into index".to_string()
+                            ).with_path(record.filename()));
+                        }
+
+                        if let Err(error) = reader.seek(SeekFrom::Start(record.offset())) {
+                            check_error!(ok, result_sender, abort_on_error,
+                                Error::io_with_path(error, record.filename()));
+                        } else {
+                            match read_record(&mut reader, record.filename().to_string()) {
+                                Ok(other_record) => {
+                                    if other_record.offset() != 0 {
+                                        check_error!(ok, result_sender, abort_on_error,
+                                            Error::new(format!("data record offset field is not 0 but {}",
+                                                    other_record.offset()))
+                                                .with_path(other_record.filename()));
+                                    }
+
+                                    if !record.same_metadata(&other_record) {
+                                        check_error!(ok, result_sender, abort_on_error,
+                                            Error::new(format!("metadata missmatch:\n{}",
+                                                    record.metadata_diff(&other_record)))
+                                                .with_path(other_record.filename()));
+                                    }
+                                }
+                                Err(error) => {
+                                    check_error!(ok, result_sender, abort_on_error, error);
+                                }
+                            };
+                        }
+
+                        if let Some(blocks) = record.compression_blocks() {
+                            if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
+                                let base_offset = if self.version >= 7 { record.offset() } else { 0 };
+                                hasher.reset();
+
+                                for block in blocks {
+                                    let block_size = block.end_offset - block.start_offset;
+
+                                    buffer.resize(block_size as usize, 0);
+                                    if let Err(error) = io!{
+                                        reader.seek(SeekFrom::Start(base_offset + block.start_offset)),
+                                        reader.read_exact(&mut buffer)
+                                    } {
+                                        let _ = result_sender.send(Err(Error::io_with_path(error, record.filename())));
+                                        return;
+                                    }
+                                    hasher.input(&buffer);
+                                }
+
+                                hasher.result(&mut actual_digest);
+                                if &actual_digest != record.sha1() {
+                                    check_error!(ok, result_sender, abort_on_error, Error::new(format!(
+                                        "checksum missmatch:\n\
+                                        \texpected: {}\n\
+                                        \tactual:   {}",
+                                        HexDisplay::new(record.sha1()),
+                                        HexDisplay::new(&actual_digest)
+                                    )).with_path(record.filename()));
+                                }
+                            }
+                        } else if let Err(error) = check_data(&mut reader, record.filename(), offset,
+                                record.size(), record.sha1(), ignore_null_checksums,
+                                &mut hasher, &mut buffer) {
+                            check_error!(ok, result_sender, abort_on_error, error);
+                        }
+
+                        if ok {
+                            let _ = result_sender.send(Ok(record.filename()));
+                        }
+                    }
+                });
+            }
+
+            drop(work_receiver);
+            drop(result_sender);
+
+            for record in records {
+                if !filenames.insert(record.filename()) {
+                    let error = Error::new(
+                        "filename not unique in archive".to_string()
+                    ).with_path(record.filename());
+
+                    error_count += 1;
+                    if abort_on_error {
+                        return Err(error);
+                    } else {
+                        let _ = error.write_to(&mut stderr(), null_separated);
+                    }
+                }
+
+                match work_sender.send(record) {
+                    Ok(()) => {}
+                    Err(error) =>
+                        return Err(Error::new(error.to_string()).with_path(record.filename()))
+                }
+            }
+
+            drop(work_sender);
+
+            let mut stderr = stderr();
+            let linesep = if options.null_separated { '\0' } else { '\n' };
+
+            while let Ok(result) = result_receiver.recv() {
+                match result {
+                    Ok(filename) => {
+                        if verbose {
+                            print!("{}: OK{}", filename, linesep);
                         }
                     }
                     Err(error) => {
-                        check_error!(error_count, abort_on_error, null_separated, error);
-                    }
-                };
-            }
-
-            if let Some(blocks) = record.compression_blocks() {
-                if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
-                    let base_offset = if self.version >= 7 { record.offset() } else { 0 };
-                    hasher.reset();
-
-                    for block in blocks {
-                        let block_size = block.end_offset - block.start_offset;
-
-                        buffer.resize(block_size as usize, 0);
-                        reader.seek(SeekFrom::Start(base_offset + block.start_offset))?;
-                        reader.read_exact(&mut buffer)?;
-                        hasher.input(&buffer);
-                    }
-
-                    hasher.result(&mut actual_digest);
-                    if &actual_digest != record.sha1() {
-                        check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
-                            "checksum missmatch:\n\
-                            \texpected: {}\n\
-                            \tactual:   {}",
-                            HexDisplay::new(record.sha1()),
-                            HexDisplay::new(&actual_digest)
-                        )).with_path(record.filename()));
+                        let _ = error.write_to(&mut stderr, null_separated);
                     }
                 }
-            } else if let Err(error) = check_data(reader, record.filename(), offset,
-                    record.size(), record.sha1(), ignore_null_checksums,
-                    &mut hasher, &mut buffer) {
-                check_error!(error_count, abort_on_error, null_separated, error);
             }
-        }
 
-        Ok(error_count)
+            Ok(error_count)
+        });
+
+        match thread_result {
+            Err(error) => {
+                return Err(Error::new(format!("threading error: {:?}", error)));
+            }
+            Ok(result) => result
+        }
     }
 
     #[inline]
