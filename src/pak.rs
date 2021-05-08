@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{convert::TryFrom, fmt::Display, num::NonZeroU32, path::Path};
+use std::{collections::HashSet, convert::TryFrom, fmt::Display, num::NonZeroU32, path::Path};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, BufReader};
+use std::io::{Read, Seek, SeekFrom, BufReader, stderr};
 
 use crypto::digest::Digest;
 use crypto::sha1::{Sha1 as Sha1Hasher};
@@ -48,14 +48,14 @@ pub type Sha1 = [u8; 20];
 pub const NULL_SHA1: Sha1 = [0u8; 20];
 
 macro_rules! check_error {
-    ($error_count:ident, $abort_on_error:expr, $null_separator:expr, $($error:tt)*) => {
+    ($error_count:ident, $abort_on_error:expr, $null_separated:expr, $($error:tt)*) => {
         {
             let error = $($error)*;
             $error_count += 1;
             if $abort_on_error {
                 return Err(error);
             }
-            eprint!("{}{}", error, $null_separator);
+            let _ = error.write_to(&mut stderr(), $null_separated);
         }
     };
 }
@@ -320,19 +320,18 @@ impl Pak {
         self.check_integrity_of(self.records.iter(), reader, abort_on_error, ignore_null_checksums, null_separated)
     }
 
-    pub fn check_integrity_of<I, Item, R>(&self, records: I, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
+    pub fn check_integrity_of<'a, I, R>(&self, records: I, reader: &mut R, abort_on_error: bool, ignore_null_checksums: bool, null_separated: bool) -> Result<usize>
     where
-        Item: AsRef<Record>,
-        I: std::iter::Iterator<Item=Item>,
+        I: std::iter::Iterator<Item=&'a Record>,
         R: Read, R: Seek {
         let mut hasher = Sha1Hasher::new();
         let mut buffer = vec![0u8; BUFFER_SIZE];
         let mut error_count = 0usize;
         let mut actual_digest = [0u8; 20];
-        let null_separator = if null_separated { '\0' } else { '\n' };
+        let mut filenames = HashSet::new();
 
         if let Err(error) = check_data(reader, "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut hasher, &mut buffer) {
-            check_error!(error_count, abort_on_error, null_separator, error);
+            check_error!(error_count, abort_on_error, null_separated, error);
         }
 
         let version = self.version;
@@ -346,16 +345,21 @@ impl Pak {
         };
 
         for record in records {
-            let record = record.as_ref();
+            if !filenames.insert(record.filename()) {
+                check_error!(error_count, abort_on_error, null_separated, Error::new(
+                    "filename not unique in archive".to_string()
+                ).with_path(record.filename()));
+            }
+
             if !COMPR_METHODS.contains(&record.compression_method()) {
-                check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
+                check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
                     "unknown compression method: 0x{:02x}",
                     record.compression_method(),
                 )).with_path(record.filename()));
             }
 
             if record.compression_method() == COMPR_NONE && record.size() != record.uncompressed_size() {
-                check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
+                check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
                     "file is not compressed but compressed size ({}) differes from uncompressed size ({})",
                     record.size(),
                     record.uncompressed_size(),
@@ -364,33 +368,33 @@ impl Pak {
 
             let offset = record.offset() + Self::header_size(self.version, record);
             if offset + record.size() > self.index_offset {
-                check_error!(error_count, abort_on_error, null_separator, Error::new(
+                check_error!(error_count, abort_on_error, null_separated, Error::new(
                     "data bleeds into index".to_string()
                 ).with_path(record.filename()));
             }
 
             if let Err(error) = reader.seek(SeekFrom::Start(record.offset())) {
-                check_error!(error_count, abort_on_error, null_separator,
+                check_error!(error_count, abort_on_error, null_separated,
                     Error::io_with_path(error, record.filename()));
             } else {
                 match read_record(reader, record.filename().to_string()) {
                     Ok(other_record) => {
                         if other_record.offset() != 0 {
-                            check_error!(error_count, abort_on_error, null_separator,
+                            check_error!(error_count, abort_on_error, null_separated,
                                 Error::new(format!("data record offset field is not 0 but {}",
                                         other_record.offset()))
                                     .with_path(other_record.filename()));
                         }
 
                         if !record.same_metadata(&other_record) {
-                            check_error!(error_count, abort_on_error, null_separator,
+                            check_error!(error_count, abort_on_error, null_separated,
                                 Error::new(format!("metadata missmatch:\n{}",
                                         record.metadata_diff(&other_record)))
                                     .with_path(other_record.filename()));
                         }
                     }
                     Err(error) => {
-                        check_error!(error_count, abort_on_error, null_separator, error);
+                        check_error!(error_count, abort_on_error, null_separated, error);
                     }
                 };
             }
@@ -411,7 +415,7 @@ impl Pak {
 
                     hasher.result(&mut actual_digest);
                     if &actual_digest != record.sha1() {
-                        check_error!(error_count, abort_on_error, null_separator, Error::new(format!(
+                        check_error!(error_count, abort_on_error, null_separated, Error::new(format!(
                             "checksum missmatch:\n\
                             \texpected: {}\n\
                             \tactual:   {}",
@@ -423,7 +427,7 @@ impl Pak {
             } else if let Err(error) = check_data(reader, record.filename(), offset,
                     record.size(), record.sha1(), ignore_null_checksums,
                     &mut hasher, &mut buffer) {
-                check_error!(error_count, abort_on_error, null_separator, error);
+                check_error!(error_count, abort_on_error, null_separated, error);
             }
         }
 

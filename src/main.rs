@@ -15,7 +15,7 @@
 
 use clap::{Arg, App, SubCommand};
 use pak::COMPR_NONE;
-use std::{convert::TryInto, num::NonZeroU32};
+use std::{convert::TryInto, io::stderr, num::NonZeroU32};
 use std::io::BufReader;
 use std::fs::File;
 
@@ -575,7 +575,7 @@ fn run() -> Result<()> {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("{}", error);
+        let _ = error.write_to(&mut stderr(), false);
         std::process::exit(1);
     }
 }

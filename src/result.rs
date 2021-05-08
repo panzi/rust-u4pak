@@ -13,16 +13,41 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::path::{PathBuf, Path};
+use std::{io::Write, path::{PathBuf, Path}};
 
 use crossbeam_channel::SendError;
 
 #[derive(Debug)]
 pub enum ErrorType {
     IO(std::io::Error),
-    EntryNotADir(String),
-    NoSuchEntry(String),
     Message(String),
+    ChannelDisconnected,
+}
+
+impl ErrorType {
+    #[inline]
+    pub fn is_io(&self) -> bool {
+        match self {
+            Self::IO(_) => true,
+            _ => false
+        }
+    }
+
+    #[inline]
+    pub fn is_message(&self) -> bool {
+        match self {
+            Self::Message(_) => true,
+            _ => false
+        }
+    }
+
+    #[inline]
+    pub fn is_channel_disconnected(&self) -> bool {
+        match self {
+            Self::ChannelDisconnected => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -42,7 +67,7 @@ impl Error {
 
     #[inline]
     pub fn io(error: std::io::Error) -> Self {
-        Error {
+        Self {
             path:       None,
             error_type: ErrorType::IO(error),
         }
@@ -50,25 +75,17 @@ impl Error {
 
     #[inline]
     pub fn io_with_path(error: std::io::Error, path: impl AsRef<Path>) -> Self {
-        Error {
+        Self {
             path:       Some(path.as_ref().to_path_buf()),
             error_type: ErrorType::IO(error),
         }
     }
 
     #[inline]
-    pub fn entry_not_a_dir(path: impl AsRef<str>) -> Self {
-        Error {
-            path:       None,
-            error_type: ErrorType::EntryNotADir(path.as_ref().to_owned()),
-        }
-    }
-
-    #[inline]
-    pub fn no_such_entry(path: impl AsRef<str>) -> Self {
-        Error {
-            path:       None,
-            error_type: ErrorType::NoSuchEntry(path.as_ref().to_owned()),
+    pub fn channel_disconnected() -> Self {
+        Self {
+            path: None,
+            error_type: ErrorType::ChannelDisconnected,
         }
     }
 
@@ -100,15 +117,32 @@ impl Error {
             error_type: self.error_type,
         }
     }
+
+    pub fn write_to(&self, writer: &mut impl Write, null_separated: bool) -> std::io::Result<()> {
+        if let Some(path) = &self.path {
+            #[cfg(target_family="unix")]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                writer.write_all(path.as_os_str().as_bytes())?;
+                writer.write_all(b": ")?;
+            }
+
+            #[cfg(not(target_family="unix"))]
+            {
+                write!(writer, "{}: ", path.to_string_lossy())?
+            }
+        }
+
+        write!(writer, "{}{}", self.error_type, if null_separated { '\0' } else { '\n' })
+    }
 }
 
 impl std::fmt::Display for ErrorType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorType::IO(err)             => err.fmt(f),
-            ErrorType::EntryNotADir(path) => write!(f, "entry is not a directory: {:?}", path),
-            ErrorType::NoSuchEntry(path)  => write!(f, "entry not found: {:?}", path),
-            ErrorType::Message(msg)       => msg.fmt(f),
+            ErrorType::IO(err)       => err.fmt(f),
+            ErrorType::Message(msg) => msg.fmt(f),
+            ErrorType::ChannelDisconnected => write!(f, "sending on a disconnected channel"),
         }
     }
 }
@@ -175,8 +209,8 @@ impl From<flate2::DecompressError> for Error {
 }
 
 impl<T: Sized> From<SendError<Result<T>>> for Error {
-    fn from(error: SendError<Result<T>>) -> Self {
-        Error::new(error.to_string())
+    fn from(_error: SendError<Result<T>>) -> Self {
+        Error::channel_disconnected()
     }
 }
 

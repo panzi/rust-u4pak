@@ -76,7 +76,9 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
             scope.spawn(move |_| {
                 let in_file = &mut in_file;
                 if let Err(error) = worker_proc(in_file, version, work_receiver, result_sender) {
-                    eprintln!("error in worker thread: {}", error);
+                    if !error.error_type().is_channel_disconnected() {
+                        eprintln!("error in worker thread: {}", error);
+                    }
                 }
             });
         }

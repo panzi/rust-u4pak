@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{collections::HashMap, convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroU32, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -237,6 +237,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     let thread_count = num_cpus::get(); // TODO: also get from arguments
 
     let thread_result = thread::scope::<_, Result<()>>(|scope| {
+        let mut filenames = HashMap::new();
         let (work_sender, work_receiver) = unbounded();
         let (result_sender, result_receiver) = unbounded();
 
@@ -246,7 +247,9 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
             scope.spawn(|_| {
                 if let Err(error) = worker_proc(&options, work_receiver, result_sender) {
-                    eprintln!("error in worker thread: {}", error);
+                    if !error.error_type().is_channel_disconnected() {
+                        eprintln!("error in worker thread: {}", error);
+                    }
                 }
             });
         }
@@ -296,6 +299,25 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                 Err(error) => return Err(Error::io_with_path(error, source_path))
             };
 
+            let mut make_filename = |file_path: &Path| -> Result<String> {
+                let mut pak_filename: Vec<String> = file_path.components()
+                    .skip(component_count)
+                    .map(|comp| comp.as_os_str().to_string_lossy().to_string())
+                    .collect();
+
+                pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
+
+                let filename = make_pak_path(pak_filename.iter());
+
+                if let Some(other_path) = filenames.insert(filename.clone(), file_path.to_owned()) {
+                    return Err(Error::new(
+                        format!("{}: filename not unique in archive, other path: {:?}", filename, other_path)
+                    ).with_path(file_path));
+                }
+
+                Ok(filename)
+            };
+
             if metadata.is_dir() {
                 let iter = match walkdir(&source_path) {
                     Ok(iter) => iter,
@@ -306,11 +328,12 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         Ok(entry) => entry,
                         Err(error) => return Err(Error::io_with_path(error, source_path))
                     };
+                    let file_path = entry.path();
+                    let filename = make_filename(&file_path)?;
                     match work_sender.send(Work {
-                        component_count,
                         compression_method,
-                        file_path: entry.path().clone(),
-                        filename: filename.clone(),
+                        file_path,
+                        filename,
                         path,
                     }) {
                         Ok(()) => {}
@@ -319,10 +342,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     }
                 }
             } else {
+                let file_path = source_path.clone();
+                let filename = make_filename(&file_path)?;
                 match work_sender.send(Work {
-                    component_count,
                     compression_method,
-                    file_path: source_path.clone(),
+                    file_path,
                     filename,
                     path,
                 }) {
@@ -339,6 +363,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
         while let Ok(result) = result_receiver.recv() {
             let (mut record, mut data) = result?;
+
             record.move_to(options.version, data_size);
 
             buffer.clear();
@@ -486,11 +511,10 @@ pub fn write_path(writer: &mut impl Write, path: &str, encoding: Encoding) -> Re
 
 #[derive(Debug)]
 struct Work<'a> {
-    filename: Vec<&'a str>,
+    filename: String,
     file_path: PathBuf,
     path: &'a PackPath,
     compression_method: u32,
-    component_count: usize,
 }
 
 fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_channel: Sender<Result<(Record, Vec<u8>)>>) -> Result<()> {
@@ -510,7 +534,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
     };
     let mut header_buffer = vec![0u8; base_header_size as usize];
 
-    while let Ok(Work {filename, file_path, path, compression_method, component_count}) = work_channel.recv() {
+    while let Ok(Work { filename, file_path, path, mut compression_method }) = work_channel.recv() {
         let mut data = Vec::new();
         let offset = 0;
         let compression_blocks;
@@ -556,6 +580,14 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
         };
 
         hasher.reset();
+
+        if uncompressed_size <= 100 {
+            // It makes no sense to compress data <= 100 bytes because of
+            // compression overhead.
+            // In any case, the compression code below can't handle
+            // uncompressed_size == 0.
+            compression_method = COMPR_NONE;
+        }
 
         match compression_method {
             self::COMPR_NONE => {
@@ -697,15 +729,8 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
         let mut sha1: Sha1 = [0u8; 20];
         hasher.result(&mut sha1);
 
-        let mut pak_filename: Vec<String> = file_path.components()
-            .skip(component_count)
-            .map(|comp| comp.as_os_str().to_string_lossy().to_string())
-            .collect();
-
-        pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
-        
         let record = Record::new(
-            make_pak_path(pak_filename.iter()),
+            filename,
             offset,
             size,
             uncompressed_size,
