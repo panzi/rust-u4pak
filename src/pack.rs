@@ -18,8 +18,7 @@ use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
-use crypto::digest::Digest;
-use crypto::sha1::{Sha1 as Sha1Hasher};
+use openssl::sha::Sha1 as OpenSSLSha1;
 use flate2::{Compression, write::ZlibEncoder};
 
 use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
@@ -402,14 +401,14 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     let mount_pount = options.mount_point.unwrap_or("");
 
-    let mut hasher = Sha1Hasher::new();
+    let mut hasher = OpenSSLSha1::new();
 
     buffer.clear();
 
     write_path(&mut buffer, mount_pount, options.encoding)?;
     encode!(&mut buffer, records.len() as u32);
     writer.write_all(&buffer)?;
-    hasher.input(&buffer);
+    hasher.update(&buffer);
 
     index_size += buffer.len() as u64;
 
@@ -430,12 +429,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         write_record(record, &mut buffer)?;
 
         writer.write_all(&buffer)?;
-        hasher.input(&buffer);
+        hasher.update(&buffer);
         index_size += buffer.len() as u64;
     }
 
-    let mut index_sha1: Sha1 = [0u8; 20];
-    hasher.result(&mut index_sha1);
+    let index_sha1: Sha1 = hasher.finish();
 
     encode!(&mut writer,
         PAK_MAGIC,
@@ -519,7 +517,6 @@ struct Work<'a> {
 }
 
 fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_channel: Sender<Result<(Record, Vec<u8>)>>) -> Result<()> {
-    let mut hasher = Sha1Hasher::new();
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let mut out_buffer = Vec::new();
 
@@ -580,7 +577,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             None
         };
 
-        hasher.reset();
+        let mut hasher = OpenSSLSha1::new();
 
         if uncompressed_size <= 100 {
             // It makes no sense to compress data <= 100 bytes because of
@@ -608,7 +605,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                     while remaining >= BUFFER_SIZE {
                         in_file.read_exact(buffer)?;
                         data.write_all(buffer)?;
-                        hasher.input(buffer);
+                        hasher.update(buffer);
                         remaining -= BUFFER_SIZE;
                     }
                 }
@@ -617,7 +614,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                     let buffer = &mut buffer[..remaining];
                     in_file.read_exact(buffer)?;
                     data.write_all(buffer)?;
-                    hasher.input(buffer);
+                    hasher.update(buffer);
                 }
             }
             self::COMPR_ZLIB => {
@@ -640,7 +637,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                     zlib.write_all(&buffer)?;
                     zlib.finish()?;
                     data.write_all(&out_buffer)?;
-                    hasher.input(&out_buffer);
+                    hasher.update(&out_buffer);
 
                     size = out_buffer.len() as u64;
 
@@ -681,7 +678,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         zlib.write_all(&buffer)?;
                         zlib.finish()?;
                         data.write_all(&out_buffer)?;
-                        hasher.input(&out_buffer);
+                        hasher.update(&out_buffer);
 
                         let compressed_block_size = out_buffer.len() as u64;
                         size += compressed_block_size;
@@ -704,7 +701,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         zlib.write_all(buffer)?;
                         zlib.finish()?;
                         data.write_all(&out_buffer)?;
-                        hasher.input(&out_buffer);
+                        hasher.update(&out_buffer);
 
                         let compressed_block_size = out_buffer.len() as u64;
                         size += compressed_block_size;
@@ -727,8 +724,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             }
         }
 
-        let mut sha1: Sha1 = [0u8; 20];
-        hasher.result(&mut sha1);
+        let sha1: Sha1 = hasher.finish();
 
         let record = Record::new(
             filename,

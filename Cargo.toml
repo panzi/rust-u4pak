@@ -8,12 +8,12 @@ license-file = "LICENSE.txt"
 [dependencies]
 clap = "2.33.3"
 chrono = "0.4"
-rust-crypto = "^0.2"
 flate2 = "1.0.20"
 #flate2 = { version = "1.0.20", features = ["zlib"], default-features = false }
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
 num_cpus = "1.0"
+openssl = { version = "0.10", features = ["vendored"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # for sendfile() and fuse support

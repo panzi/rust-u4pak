@@ -19,8 +19,7 @@ use std::io::{Read, Seek, SeekFrom, BufReader, stderr};
 
 use crossbeam_channel::unbounded;
 use crossbeam_utils::thread;
-use crypto::digest::Digest;
-use crypto::sha1::Sha1 as Sha1Hasher;
+use openssl::sha::Sha1 as OpenSSLSha1;
 
 use crate::{decode, reopen::Reopen};
 use crate::decode::Decode;
@@ -219,29 +218,28 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     encoding.parse_vec(buf)
 }
 
-fn check_data<R>(reader: &mut R, filename: &str, offset: u64, size: u64, checksum: &Sha1, ignore_null_checksums: bool, hasher: &mut Sha1Hasher, buffer: &mut Vec<u8>) -> Result<()>
+fn check_data<R>(reader: &mut R, filename: &str, offset: u64, size: u64, checksum: &Sha1, ignore_null_checksums: bool, buffer: &mut Vec<u8>) -> Result<()>
 where R: Read, R: Seek {
     if ignore_null_checksums && checksum == &NULL_SHA1 {
         return Ok(());
     }
     reader.seek(SeekFrom::Start(offset))?;
-    hasher.reset();
+    let mut hasher = OpenSSLSha1::new();
     let mut remaining = size;
     buffer.resize(BUFFER_SIZE, 0);
     loop {
         if remaining >= BUFFER_SIZE as u64 {
             reader.read_exact(buffer)?;
-            hasher.input(&buffer);
+            hasher.update(&buffer);
             remaining -= BUFFER_SIZE as u64;
         } else {
             let buffer = &mut buffer[..remaining as usize];
             reader.read_exact(buffer)?;
-            hasher.input(&buffer);
+            hasher.update(&buffer);
             break;
         }
     }
-    let mut actual_digest = [0u8; 20];
-    hasher.result(&mut actual_digest);
+    let actual_digest = hasher.finish();
     if &actual_digest != checksum {
         return Err(Error::new(format!(
             "checksum missmatch:\n\
@@ -363,12 +361,11 @@ impl Pak {
     where
         I: std::iter::Iterator<Item=&'a Record> {
         let CheckOptions { abort_on_error, ignore_null_checksums, null_separated, verbose, thread_count } = options;
-        let mut hasher = Sha1Hasher::new();
         let mut error_count = 0usize;
         let mut filenames = HashSet::new();
         let pak_path = in_file.path()?;
 
-        if let Err(error) = check_data(&mut BufReader::new(in_file), "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut hasher, &mut vec![0u8; BUFFER_SIZE]) {
+        if let Err(error) = check_data(&mut BufReader::new(in_file), "<archive index>", self.index_offset, self.index_size, &self.index_sha1, ignore_null_checksums, &mut vec![0u8; BUFFER_SIZE]) {
             error_count += 1;
             if abort_on_error {
                 return Err(error);
@@ -399,7 +396,6 @@ impl Pak {
                 scope.spawn(move |_| {
                     let mut reader = BufReader::new(in_file);
                     let mut buffer = vec![0u8; BUFFER_SIZE];
-                    let mut actual_digest = [0u8; 20];
 
                     while let Ok(record) = work_receiver.recv() {
                         let mut ok = true;
@@ -455,7 +451,7 @@ impl Pak {
                         if let Some(blocks) = record.compression_blocks() {
                             if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
                                 let base_offset = if self.version >= 7 { record.offset() } else { 0 };
-                                hasher.reset();
+                                let mut hasher = OpenSSLSha1::new();
 
                                 for block in blocks {
                                     let block_size = block.end_offset - block.start_offset;
@@ -468,10 +464,10 @@ impl Pak {
                                         let _ = result_sender.send(Err(Error::io_with_path(error, record.filename())));
                                         return;
                                     }
-                                    hasher.input(&buffer);
+                                    hasher.update(&buffer);
                                 }
 
-                                hasher.result(&mut actual_digest);
+                                let actual_digest = hasher.finish();
                                 if &actual_digest != record.sha1() {
                                     check_error!(ok, result_sender, abort_on_error, Error::new(format!(
                                         "checksum missmatch:\n\
@@ -483,8 +479,7 @@ impl Pak {
                                 }
                             }
                         } else if let Err(error) = check_data(&mut reader, record.filename(), offset,
-                                record.size(), record.sha1(), ignore_null_checksums,
-                                &mut hasher, &mut buffer) {
+                                record.size(), record.sha1(), ignore_null_checksums, &mut buffer) {
                             check_error!(ok, result_sender, abort_on_error, error);
                         }
 
