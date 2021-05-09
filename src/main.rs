@@ -50,9 +50,12 @@ pub use unpack::unpack;
 pub mod pack;
 pub use pack::{pack, PackOptions};
 
+pub mod check;
+pub use check::check;
+
 pub mod walkdir;
 
-use crate::{pack::PackPath, pak::{COMPR_ZLIB, CheckOptions, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
+use crate::{check::CheckOptions, pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
 
 pub mod io;
 
@@ -451,6 +454,11 @@ fn run() -> Result<()> {
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let paths = get_paths(args)?;
+            let paths: Option<&[&str]> = if let Some(paths) = &paths {
+                Some(paths)
+            } else {
+                None
+            };
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -476,19 +484,10 @@ fn run() -> Result<()> {
                 null_separated,
                 verbose,
                 thread_count: get_threads(args)?,
+                paths,
             };
 
-            let error_count = if let Some(paths) = paths {
-                let mut filter = Filter::from_paths(paths.into_iter());
-                let records = pak.records()
-                    .iter()
-                    .filter(|&record| filter.visit(record.filename()));
-                let count = pak.check_integrity_of(records, &mut file, options)?;
-                filter.assert_all_visited()?;
-                count
-            } else {
-                pak.check_integrity(&mut file, options)?
-            };
+            let error_count = check(&pak, &mut file, options)?;
 
             let sep = if null_separated { '\0' } else { '\n' };
             if error_count == 0 {
