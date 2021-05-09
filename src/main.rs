@@ -13,11 +13,14 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use clap::{App, AppSettings, Arg, SubCommand};
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use pak::COMPR_NONE;
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
 use std::fs::File;
+
+#[cfg(target_family="windows")]
+use std::convert::TryFrom;
 
 pub mod pak;
 pub use pak::{Pak, Options};
@@ -222,13 +225,55 @@ fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
             file name separators.")
 }
 
-fn run() -> Result<()> {
+#[cfg(target_family="windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Pause {
+    Always,
+    Never,
+    Auto,
+}
+
+#[cfg(target_family="windows")]
+impl Default for Pause {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[cfg(target_family="windows")]
+impl TryFrom<&str> for Pause {
+    type Error = crate::Error;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        let trim_value = value.trim();
+
+        if trim_value.eq_ignore_ascii_case("auto") {
+            Ok(Pause::Auto)
+        } else if trim_value.eq_ignore_ascii_case("never") {
+            Ok(Pause::Never)
+        } else if trim_value.eq_ignore_ascii_case("always") {
+            Ok(Pause::Always)
+        } else {
+            Err(Error::new(format!("illegal value for --pause: {:?}", value)))
+        }
+    }
+}
+
+fn main() {
     let default_block_size_str = format!("{}", DEFAULT_BLOCK_SIZE);
 
     let app = App::new("VPK - Valve Packages")
         .version("1.0.0")
         .global_setting(AppSettings::VersionlessSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
+
+    #[cfg(target_family="windows")]
+    let app = app
+        .arg(Arg::with_name("pause")
+            .long("pause")
+            .default_value("auto")
+            .takes_value(true)
+            .help("Wait for user to press ENTER at exit. Possible values: always, never, auto."));
 
     let app = app
         .subcommand(SubCommand::with_name("info")
@@ -368,8 +413,44 @@ fn run() -> Result<()> {
             .required(true)
             .value_name("MOUNTPT")));
 
-    let matches = app.get_matches();
+    let matches = match app.get_matches_safe() {
+        Ok(matches) => matches,
+        Err(error) => {
+            if error.use_stderr() {
+                eprintln!("{}", error);
+                #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+                std::process::exit(1);
+            } else {
+                println!("{}", error);
+                #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+                return;
+            }
+        }
+    };
 
+    #[cfg(target_family="windows")]
+    let pause: Pause = match matches.value_of("pause").unwrap().try_into() {
+        Ok(pause) => pause,
+        Err(error) => {
+            eprintln!("{}", error);
+            windows::pause_if_owns_terminal();
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(error) = run(&matches) {
+        let _ = error.write_to(&mut stderr(), false);
+    }
+
+    #[cfg(target_family="windows")]
+    match pause {
+        Pause::Always => windows::pause(),
+        Pause::Never  => {},
+        Pause::Auto   => windows::pause_if_owns_terminal(),
+    }
+}
+
+fn run(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         ("info", Some(args)) => {
             let human_readable        = args.is_present("human-readable");
@@ -606,9 +687,32 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn main() {
-    if let Err(error) = run() {
-        let _ = error.write_to(&mut stderr(), false);
-        std::process::exit(1);
+#[allow(unused)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[cfg(target_family="windows")]
+mod windows {
+    use std::io::Read;
+
+    pub(crate) type DWORD = u32;
+
+    #[link(name = "user32")]
+    extern "stdcall" {
+        pub(crate) fn GetConsoleProcessList(lpdwProcessList: *mut DWORD, dwProcessCount: DWORD) -> DWORD;
+    }
+
+    pub fn pause() {
+        println!("Press ENTER to continue...");
+        let mut buf = [0];
+        let _ = std::io::stdin().read(&mut buf);
+    }
+
+    pub fn pause_if_owns_terminal() {
+        let mut process_list = [0, 0];
+        let count = unsafe { GetConsoleProcessList(process_list.as_mut_ptr() as *mut DWORD, process_list.len() as DWORD) };
+
+        if count == 1 {
+            pause();
+        }
     }
 }
