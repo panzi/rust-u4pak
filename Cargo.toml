@@ -13,6 +13,7 @@ flate2 = "1.0.20"
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
 num_cpus = "1.0"
+# OpenSSL's SHA-1 implementation is much faster than the one in rust-crypto
 openssl = { version = "0.10", features = ["vendored"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
