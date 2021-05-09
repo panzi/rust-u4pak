@@ -17,7 +17,7 @@ use std::io::Write;
 
 use chrono::NaiveDateTime;
 
-use crate::sort::{sort, Order};
+use crate::{Filter, sort::{sort, Order}};
 use crate::util::{format_size, print_table, Align::*};
 use crate::result::Result;
 use crate::record::Record;
@@ -32,7 +32,7 @@ pub enum ListStyle {
 pub struct ListOptions<'a> {
     pub order: Option<&'a Order>,
     pub style: ListStyle,
-    pub filter: Option<crate::Filter<'a>>,
+    pub paths: Option<&'a [&'a str]>,
 }
 
 impl ListOptions<'_> {
@@ -55,41 +55,47 @@ impl Default for ListOptions<'_> {
         Self {
             order: None,
             style: ListStyle::default(),
-            filter: None,
+            paths: None,
         }
     }
 }
 
 pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
     let version = pak.version();
-    match (options.order, &options.filter) {
-        (Some(order), Some(filter)) => {
+    match (options.order, options.paths) {
+        (Some(order), Some(paths)) => {
+            let mut filter = Filter::from_paths(paths.iter().cloned());
             let mut records = pak.records()
                 .iter()
-                .filter(|record| filter.contains(record.filename()))
+                .filter(|record| filter.visit(record.filename()))
                 .collect();
 
             sort(&mut records, order);
-            list_records(version, &records, options)
+            list_records(version, &records, options)?;
+            filter.assert_all_visited()?;
         }
         (Some(order), None) => {
             let mut records = pak.into_records();
 
             sort(&mut records, order);
-            list_records(version, &records, options)
+            list_records(version, &records, options)?;
         }
-        (None, Some(filter)) => {
+        (None, Some(paths)) => {
+            let mut filter = Filter::from_paths(paths.iter().cloned());
             let records = pak.records()
                 .iter()
-                .filter(|record| filter.contains(record.filename()))
+                .filter(|record| filter.visit(record.filename()))
                 .collect::<Vec<_>>();
 
-            list_records(version, &records, options)
+            list_records(version, &records, options)?;
+            filter.assert_all_visited()?;
         }
         (None, None) => {
-            list_records(version, pak.records(), options)
+            list_records(version, pak.records(), options)?;
         }
     }
+
+    Ok(())
 }
 
 fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptions) -> Result<()> {

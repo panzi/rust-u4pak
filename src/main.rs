@@ -58,15 +58,25 @@ pub mod io;
 
 pub mod reopen;
 
-fn get_filter<'a>(args: &'a clap::ArgMatches) -> Option<Filter<'a>> {
-    if let Some(paths) = args.values_of("paths") {
-        if paths.len() == 0 {
-            None
+fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
+    if let Some(arg_paths) = args.values_of("paths") {
+        let count = arg_paths.len();
+        if count == 0 {
+            Ok(None)
         } else {
-            Some(Filter::from_paths(paths))
+            let mut paths: Vec<&str> = Vec::with_capacity(count);
+            for path in arg_paths {
+                if path.is_empty() {
+                    return Err(Error::new(
+                        "Path may not be empty. Use \"/\" to reference the root directory of a pak archive."
+                        .to_string()));
+                }
+                paths.push(path);
+            }
+            Ok(Some(paths))
         }
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -153,13 +163,6 @@ fn arg_verbose<'a, 'b>() -> Arg<'a, 'b> {
         .short("v")
         .takes_value(false)
         .help("Verbose output.")
-}
-fn arg_check_integrity<'a, 'b>() -> Arg<'a, 'b> {
-    Arg::with_name("check-integrity")
-        .long("check-integrity")
-        .short("c")
-        .takes_value(false)
-        .help("Check integrity of package")
 }
 
 fn arg_ignore_magic<'a, 'b>() -> Arg<'a, 'b> {
@@ -261,12 +264,10 @@ fn run() -> Result<()> {
                     \n\
                     u4pak list --sort=-size,name")
             )
-            .arg(arg_check_integrity())
             .arg(arg_print0().requires("only-names"))
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
-            .arg(arg_ignore_null_checksums())
             .arg(arg_human_readable())
             .arg(arg_threads())
             .arg(arg_package())
@@ -287,11 +288,9 @@ fn run() -> Result<()> {
             .alias("u")
             .about("Unpack content of a package.")
             .arg(arg_print0())
-            .arg(arg_check_integrity())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
-            .arg(arg_ignore_null_checksums())
             .arg(arg_threads())
             .arg(arg_verbose())
             .arg(Arg::with_name("dirname-from-compression")
@@ -351,7 +350,6 @@ fn run() -> Result<()> {
     let app = app.subcommand(SubCommand::with_name("mount")
         .alias("m")
         .about("Mount package as read-only filesystem.")
-        .arg(arg_check_integrity())
         .arg(arg_ignore_magic())
         .arg(arg_encoding())
         .arg(arg_force_version())
@@ -405,12 +403,15 @@ fn run() -> Result<()> {
             let human_readable        = args.is_present("human-readable");
             let null_separated        = args.is_present("print0");
             let only_names            = args.is_present("only-names");
-            let check_integrity       = args.is_present("check-integrity");
             let ignore_magic          = args.is_present("ignore-magic");
-            let ignore_null_checksums = args.is_present("ignore-null-checksums");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
-            let filter = get_filter(args);
+            let paths = get_paths(args)?;
+            let paths: Option<&[&str]> = if let Some(paths) = &paths {
+                Some(paths)
+            } else {
+                None
+            };
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -432,24 +433,6 @@ fn run() -> Result<()> {
 
             drop(reader);
 
-            if check_integrity {
-                let options = CheckOptions {
-                    abort_on_error: true,
-                    ignore_null_checksums,
-                    null_separated,
-                    verbose: false,
-                    thread_count: get_threads(args)?,
-                };
-                if let Some(filter) = &filter {
-                    let records = pak.records()
-                        .iter()
-                        .filter(|record| filter.contains(record.filename()));
-                    pak.check_integrity_of(records, &mut file, options)?;
-                } else {
-                    pak.check_integrity(&mut file, options)?;
-                }
-            }
-
             list(pak, ListOptions {
                 order,
                 style: if only_names {
@@ -457,7 +440,7 @@ fn run() -> Result<()> {
                 } else {
                     ListStyle::Table { human_readable }
                 },
-                filter,
+                paths,
             })?;
         }
         ("check", Some(args)) => {
@@ -467,7 +450,7 @@ fn run() -> Result<()> {
             let verbose               = args.is_present("verbose");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
-            let filter = get_filter(args);
+            let paths = get_paths(args)?;
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -495,11 +478,14 @@ fn run() -> Result<()> {
                 thread_count: get_threads(args)?,
             };
 
-            let error_count = if let Some(filter) = &filter {
+            let error_count = if let Some(paths) = paths {
+                let mut filter = Filter::from_paths(paths.into_iter());
                 let records = pak.records()
                     .iter()
-                    .filter(|record| filter.contains(record.filename()));
-                pak.check_integrity_of(records, &mut file, options)?
+                    .filter(|&record| filter.visit(record.filename()));
+                let count = pak.check_integrity_of(records, &mut file, options)?;
+                filter.assert_all_visited()?;
+                count
             } else {
                 pak.check_integrity(&mut file, options)?
             };
@@ -517,13 +503,16 @@ fn run() -> Result<()> {
             let null_separated           = args.is_present("print0");
             let verbose                  = args.is_present("verbose");
             let ignore_magic             = args.is_present("ignore-magic");
-            let check_integrity          = args.is_present("check-integrity");
-            let ignore_null_checksums    = args.is_present("ignore-null-checksums");
             let dirname_from_compression = args.is_present("dirname-from-compression");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
-            let path = args.value_of("package").unwrap();
-            let filter = get_filter(args);
             let thread_count = get_threads(args)?;
+            let path = args.value_of("package").unwrap();
+            let paths = get_paths(args)?;
+            let paths: Option<&[&str]> = if let Some(paths) = &paths {
+                Some(paths)
+            } else {
+                None
+            };
 
             let force_version = if let Some(version) = args.value_of("force-version") {
                 Some(version.parse()?)
@@ -545,29 +534,11 @@ fn run() -> Result<()> {
 
             drop(reader);
 
-            if check_integrity {
-                let options = CheckOptions {
-                    abort_on_error: true,
-                    ignore_null_checksums,
-                    null_separated,
-                    verbose: false,
-                    thread_count,
-                };
-                if let Some(filter) = &filter {
-                    let records = pak.records()
-                        .iter()
-                        .filter(|record| filter.contains(record.filename()));
-                    pak.check_integrity_of(records, &mut file, options)?;
-                } else {
-                    pak.check_integrity(&mut file, options)?;
-                }
-            }
-
             unpack(&pak, &mut file, outdir, UnpackOptions {
                 dirname_from_compression,
                 verbose,
                 null_separated,
-                filter,
+                paths,
                 thread_count,
             })?;
         }

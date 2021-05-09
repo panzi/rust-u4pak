@@ -31,7 +31,7 @@ pub struct UnpackOptions<'a> {
     pub dirname_from_compression: bool,
     pub verbose: bool,
     pub null_separated: bool,
-    pub filter: Option<Filter<'a>>,
+    pub paths: Option<&'a [&'a str]>,
     pub thread_count: NonZeroUsize,
 }
 
@@ -41,7 +41,7 @@ impl Default for UnpackOptions<'_> {
             dirname_from_compression: false,
             verbose: false,
             null_separated: false,
-            filter: None,
+            paths: None,
             thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
@@ -148,12 +148,13 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, options: UnpackOptions<'a>) -> Result<()> {
     let outdir = outdir.as_ref();
 
-    if let Some(filter) = &options.filter {
-        let records = pak.records()
-            .iter()
-            .filter(|record| filter.contains(record.filename()));
+    if let Some(paths) = options.paths {
+        let mut filter: Filter = paths.into();
+        let records = pak.records().iter()
+            .filter(|record| filter.visit(record.filename()));
 
         unpack_iter(pak, in_file, outdir, &options, records)?;
+        filter.assert_all_visited()?;
     } else {
         unpack_iter(pak, in_file, outdir, &options, pak.records().iter())?;
     }

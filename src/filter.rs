@@ -13,10 +13,16 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::iter::Map;
+
+use crate::Error;
+use crate::Result;
+
 #[derive(Debug)]
 pub struct Filter<'a> {
     nodes: std::collections::HashMap<&'a str, Filter<'a>>,
     included: bool,
+    visited: bool,
 }
 
 impl<'a> Filter<'a> {
@@ -24,6 +30,7 @@ impl<'a> Filter<'a> {
         Self {
             nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
             included: false,
+            visited: false,
         }
     }
 
@@ -32,6 +39,7 @@ impl<'a> Filter<'a> {
         let mut filter = Self {
             nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
             included: false,
+            visited: false,
         };
 
         for path in paths {
@@ -65,7 +73,7 @@ impl<'a> Filter<'a> {
 
     #[inline]
     pub fn contains(&self, path: impl AsRef<str>) -> bool {
-        self.contains_iter(path.as_ref().trim_matches('/').split('/'))
+        self.contains_iter(path.as_ref().trim_matches('/').split('/').filter(|comp| !comp.is_empty()))
     }
 
     pub fn contains_iter<'b, I>(&self, mut path: I) -> bool
@@ -73,9 +81,7 @@ impl<'a> Filter<'a> {
         if self.included {
             true
         } else if let Some(name) = path.next() {
-            if name.is_empty() {
-                self.contains_iter(path)
-            } else if let Some(child) = self.nodes.get(name) {
+            if let Some(child) = self.nodes.get(name) {
                 child.contains_iter(path)
             } else {
                 false
@@ -83,5 +89,113 @@ impl<'a> Filter<'a> {
         } else {
             false
         }
+    }
+
+    #[inline]
+    pub fn visit(&mut self, path: impl AsRef<str>) -> bool {
+        self.visit_iter(path.as_ref().trim_matches('/').split('/').filter(|comp| !comp.is_empty()))
+    }
+
+    pub fn visit_iter<'b, I>(&mut self, mut path: I) -> bool
+    where I: std::iter::Iterator<Item=&'b str> {
+        if self.included {
+            self.visited = true;
+            if let Some(name) = path.next() {
+                if let Some(child) = self.nodes.get_mut(name) {
+                    child.visit_iter(path);
+                }
+            }
+
+            true
+        } else if let Some(name) = path.next() {
+            if let Some(child) = self.nodes.get_mut(name) {
+                child.visit_iter(path)
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn iter(&'a self) -> FilterIter<'a> {
+        FilterIter {
+            stack: vec![(self, self.nodes.iter(), 0)],
+            buffer: String::new(),
+        }
+    }
+
+    #[inline]
+    pub fn paths(&'a self) -> Map<FilterIter<'_>, impl FnMut((&'a Filter<'a>, String)) -> String> {
+        self.iter().map(|(_, path)| path)
+    }
+
+    #[inline]
+    pub fn visited_paths(&'a self) -> Map<std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>, impl FnMut((&'a Filter<'a>, String)) -> String> {
+        self.iter().filter(|&(filter, _)| filter.visited).map(|(_, path)| path)
+    }
+
+    #[inline]
+    pub fn non_visited_paths(&'a self) -> Map<std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>, impl FnMut((&'a Filter<'a>, String)) -> String> {
+        self.iter().filter(|&(filter, _)| !filter.visited).map(|(_, path)| path)
+    }
+
+    pub fn assert_all_visited(&self) -> Result<()> {
+        let mut iter = self.non_visited_paths();
+        if let Some(filename) = iter.next() {
+            let mut message = format!("Paths not found in pak:\n* {}", filename);
+            for filename in iter {
+                message.push_str("\n* ");
+                message.push_str(&filename);
+            }
+            return Err(Error::new(message));
+        }
+        Ok(())
+    }
+
+    //#[inline]
+    //pub fn filter<'b, I>(&'a mut self, records: I) -> std::iter::Filter<I, impl FnMut(&&'b Record) -> bool>
+    //where I: Iterator<Item=&'b Record> {
+    //    records.filter(move |&record| self.visit(record.filename()))
+    //}
+}
+
+#[derive(Debug)]
+pub struct FilterIter<'a> {
+    stack: Vec<(&'a Filter<'a>, std::collections::hash_map::Iter<'a, &'a str, Filter<'a>>, usize)>,
+    buffer: String,
+}
+
+impl<'a> std::iter::Iterator for FilterIter<'a> {
+    type Item = (&'a Filter<'a>, String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(&mut (_, ref mut iter, buffer_index)) = self.stack.last_mut() {
+            if let Some((&name, child)) = iter.next() {
+                let prev_index = self.buffer.len();
+                self.buffer.push('/');
+                self.buffer.push_str(name);
+                self.stack.push((child, child.nodes.iter(), prev_index));
+            } else {
+                let (child, _, _) = self.stack.pop().unwrap();
+
+                if child.included {
+                    let filename = self.buffer.clone();
+                    self.buffer.truncate(buffer_index);
+                    return Some((child, filename));
+                } else {
+                    self.buffer.truncate(buffer_index);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a> From<&[&'a str]> for Filter<'a> {
+    #[inline]
+    fn from(paths: &[&'a str]) -> Self {
+        Filter::from_paths(paths.iter().cloned())
     }
 }

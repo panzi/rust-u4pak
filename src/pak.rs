@@ -20,7 +20,7 @@ use std::io::{Read, Seek, SeekFrom, BufReader, stderr};
 use crossbeam_channel::unbounded;
 use crossbeam_utils::thread;
 use crypto::digest::Digest;
-use crypto::sha1::{Sha1 as Sha1Hasher};
+use crypto::sha1::Sha1 as Sha1Hasher;
 
 use crate::{decode, reopen::Reopen};
 use crate::decode::Decode;
@@ -585,6 +585,11 @@ impl Pak {
     pub fn into_records(self) -> Vec<Record> {
         self.records
     }
+
+    //#[inline]
+    //pub fn filter_records<'a>(&'a self, filter: &'a mut Filter<'a>) -> std::iter::Filter<impl Iterator<Item=&'a Record>, impl FnMut(&&'a Record) -> bool> {
+    //    filter.filter(self.records.iter())
+    //}
 
     pub fn header_size(version: u32, record: &Record) -> u64 {
         match version {
