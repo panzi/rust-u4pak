@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, convert::{TryFrom, TryInto}, io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize}, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{collections::HashMap, convert::TryFrom, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize}, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -50,51 +50,6 @@ impl PackPath {
             filename,
             rename: None,
         }
-    }
-
-    #[inline]
-    pub fn read_from_path(path: impl AsRef<Path>) -> Result<Vec<PackPath>> {
-        match File::open(&path) {
-            Ok(mut file) => match Self::read_from_file(&mut file) {
-                Ok(res) => Ok(res),
-                Err(error) => Err(error.with_path_if_none(path))
-            },
-            Err(error) => Err(Error::io_with_path(error, path))
-        }
-    }
-
-    #[inline]
-    pub fn read_from_file(file: &mut File) -> Result<Vec<PackPath>> {
-        Self::read_from_reader(BufReader::new(file))
-    }
-
-    #[inline]
-    pub fn read_from_reader(mut reader: impl BufRead) -> Result<Vec<PackPath>> {
-        let mut paths = Vec::new();
-        let mut lineno = 1usize;
-        loop {
-            let mut line = String::new();
-            let count = reader.read_line(&mut line)?;
-
-            if count == 0 {
-                break;
-            }
-
-            let line = line.trim();
-
-            if !line.starts_with('#') {
-                let path = match line.try_into() {
-                    Ok(path) => path,
-                    Err(error) =>
-                        return Err(Error::new(format!(":{}: {}", lineno, error)))
-                };
-
-                paths.push(path);
-            }
-
-            lineno += 1;
-        }
-        Ok(paths)
     }
 }
 

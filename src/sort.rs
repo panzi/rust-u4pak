@@ -47,33 +47,33 @@ impl TryFrom<&str> for SortKey {
     type Error = Error;
 
     fn try_from(value: &str) -> Result<SortKey> {
-        if value.eq_ignore_ascii_case("name") || value.eq_ignore_ascii_case("path") || value.eq_ignore_ascii_case("filename") {
+        if value.eq_ignore_ascii_case("p") || value.eq_ignore_ascii_case("name") || value.eq_ignore_ascii_case("path") || value.eq_ignore_ascii_case("filename") {
             Ok(SortKey::Name)
-        } else if value.eq_ignore_ascii_case("size") || value.eq_ignore_ascii_case("compressed-size") {
+        } else if value.eq_ignore_ascii_case("s") || value.eq_ignore_ascii_case("size") || value.eq_ignore_ascii_case("compressed-size") {
             Ok(SortKey::Size)
-        } else if value.eq_ignore_ascii_case("offset") {
+        } else if value.eq_ignore_ascii_case("o") || value.eq_ignore_ascii_case("offset") {
             Ok(SortKey::Offset)
-        } else if value.eq_ignore_ascii_case("compr-method") || value.eq_ignore_ascii_case("compression-method") {
+        } else if value.eq_ignore_ascii_case("c") || value.eq_ignore_ascii_case("compr-method") || value.eq_ignore_ascii_case("compression-method") {
             Ok(SortKey::ComprMethod)
-        } else if value.eq_ignore_ascii_case("uncompressed-size") {
+        } else if value.eq_ignore_ascii_case("u") || value.eq_ignore_ascii_case("uncompressed-size") {
             Ok(SortKey::UncomprSize)
-        } else if value.eq_ignore_ascii_case("compression-block-size") {
+        } else if value.eq_ignore_ascii_case("b") || value.eq_ignore_ascii_case("compression-block-size") {
             Ok(SortKey::ComprBlockSize)
-        } else if value.eq_ignore_ascii_case("timestamp") {
+        } else if value.eq_ignore_ascii_case("t") || value.eq_ignore_ascii_case("timestamp") {
             Ok(SortKey::Timestamp)
-        } else if value.eq_ignore_ascii_case("-name") {
+        } else if value.eq_ignore_ascii_case("-p") || value.eq_ignore_ascii_case("-name") || value.eq_ignore_ascii_case("-path") || value.eq_ignore_ascii_case("-filename") {
             Ok(SortKey::RevName)
-        } else if value.eq_ignore_ascii_case("-size") || value.eq_ignore_ascii_case("-compressed-size") {
+        } else if value.eq_ignore_ascii_case("-s") || value.eq_ignore_ascii_case("-size") || value.eq_ignore_ascii_case("-compressed-size") {
             Ok(SortKey::RevSize)
-        } else if value.eq_ignore_ascii_case("-offset") {
+        } else if value.eq_ignore_ascii_case("-o") || value.eq_ignore_ascii_case("-offset") {
             Ok(SortKey::RevOffset)
-        } else if value.eq_ignore_ascii_case("-compr-method") || value.eq_ignore_ascii_case("-compression-method") {
+        } else if value.eq_ignore_ascii_case("-c") || value.eq_ignore_ascii_case("-compr-method") || value.eq_ignore_ascii_case("-compression-method") {
             Ok(SortKey::RevComprMethod)
-        } else if value.eq_ignore_ascii_case("-uncompressed-size") {
+        } else if value.eq_ignore_ascii_case("-u") || value.eq_ignore_ascii_case("-uncompressed-size") {
             Ok(SortKey::RevUncomprSize)
-        } else if value.eq_ignore_ascii_case("-compression-block-size") {
+        } else if value.eq_ignore_ascii_case("-b") ||value.eq_ignore_ascii_case("-compression-block-size") {
             Ok(SortKey::RevComprBlockSize)
-        } else if value.eq_ignore_ascii_case("-timestamp") {
+        } else if value.eq_ignore_ascii_case("-t") ||value.eq_ignore_ascii_case("-timestamp") {
             Ok(SortKey::RevTimestamp)
         } else {
             Err(Error::new(format!("illegal argument --sort={:?}", value)))

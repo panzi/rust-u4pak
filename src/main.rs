@@ -23,7 +23,7 @@ use std::fs::File;
 use std::convert::TryFrom;
 
 pub mod pak;
-pub use pak::{Pak, Options};
+pub use pak::{Pak, Options, COMPR_ZLIB};
 
 pub mod result;
 pub use result::{Error, Result};
@@ -41,6 +41,8 @@ pub mod list;
 pub use list::{list, ListOptions, ListStyle};
 
 pub mod util;
+pub use util::parse_size;
+
 pub mod decode;
 pub mod encode;
 
@@ -48,21 +50,19 @@ pub mod filter;
 pub use filter::Filter;
 
 pub mod unpack;
-pub use unpack::unpack;
+pub use unpack::{unpack, UnpackOptions};
 
 pub mod pack;
-pub use pack::{pack, PackOptions};
+pub use pack::{pack, PackOptions, PackPath};
 
 pub mod check;
-pub use check::check;
+pub use check::{check, CheckOptions};
 
 pub mod walkdir;
 
-use crate::{check::CheckOptions, pack::PackPath, pak::{COMPR_ZLIB, DEFAULT_BLOCK_SIZE}, unpack::UnpackOptions, util::parse_size};
-
 pub mod io;
-
 pub mod reopen;
+pub mod args;
 
 fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
     if let Some(arg_paths) = args.values_of("paths") {
@@ -259,21 +259,22 @@ impl TryFrom<&str> for Pause {
     }
 }
 
-fn main() {
-    let default_block_size_str = format!("{}", DEFAULT_BLOCK_SIZE);
+const DEFAULT_BLOCK_SIZE_STR: &str = "65536";
 
+fn make_app<'a, 'b>() -> App<'a, 'b> {
     let app = App::new("VPK - Valve Packages")
         .version("1.0.0")
         .global_setting(AppSettings::VersionlessSubcommands)
+        .global_setting(AppSettings::AllowExternalSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
     #[cfg(target_family="windows")]
     let app = app
-        .arg(Arg::with_name("pause")
-            .long("pause")
+        .arg(Arg::with_name("pause-on-exit")
+            .long("pause-on-exit")
             .default_value("auto")
             .takes_value(true)
-            .help("Wait for user to press ENTER at exit. Possible values: always, never, auto."));
+            .help("Wait for user to press ENTER on exit. Possible values: always, never, auto."));
 
     let app = app
         .subcommand(SubCommand::with_name("info")
@@ -293,7 +294,7 @@ fn main() {
                 .takes_value(false)
                 .help(
                     "Only print file names. \
-                     This is useful for use with xargs and the like."))
+                    This is useful for use with xargs and the like."))
             .arg(Arg::with_name("sort")
                 .long("sort")
                 .short("s")
@@ -302,15 +303,17 @@ fn main() {
                 .help(
                     "Sort order of list as comma separated keys:\n\
                     \n\
-                    * path               - path of the file inside the package\n\
-                    * size               - size of the data embedded in the package\n\
-                    * uncompressed-size  - sum of the other two sizes\n\
-                    * offset             - offset inside of the package\n\
-                    * compression-method - the compression method\n\
+                    * p, path                   - path of the file inside the package\n\
+                    * o, offset                 - offset inside of the package\n\
+                    * s, size                   - size of the data embedded in the package\n\
+                    * u, uncompressed-size      - size of the data when uncompressed\n\
+                    * c, compression-method     - the compression method (zlib or none)\n\
+                    * b, compression-block-size - size of blocks a compressed file is split into\n\
+                    * t, timestamp              - timestamp of a file (only in pak version 1)\n\
                     \n\
-                    If you prepend the order with - you invert the sort order for that key. E.g.:\n\
+                    You can invert the sort order by prepending - to the key. E.g.:\n\
                     \n\
-                    u4pak list --sort=-size,name")
+                    u4pak list --sort=-size,-timestamp,name")
             )
             .arg(arg_print0().requires("only-names"))
             .arg(arg_ignore_magic())
@@ -377,7 +380,7 @@ fn main() {
                 .long("compression-block-size")
                 .short("b")
                 .takes_value(true)
-                .default_value(&default_block_size_str))
+                .default_value(DEFAULT_BLOCK_SIZE_STR))
             .arg(Arg::with_name("compression-level")
                 .long("compression-level")
                 .short("l")
@@ -413,7 +416,26 @@ fn main() {
             .required(true)
             .value_name("MOUNTPT")));
 
-    let matches = match app.get_matches_safe() {
+    app
+}
+
+fn main() {
+    let args_from_file = match args::get_args_from_file() {
+        Ok(args_from_file) => args_from_file,
+        Err(error) => {
+            let _ = error.write_to(&mut stderr(), false);
+            #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+            return;
+        }
+    };
+
+    let matches = if let Some(args) = args_from_file {
+        make_app().get_matches_from_safe_borrow(args.iter())
+    } else {
+        make_app().get_matches_safe()
+    };
+
+    let matches = match matches {
         Ok(matches) => matches,
         Err(error) => {
             if error.use_stderr() {
@@ -429,7 +451,7 @@ fn main() {
     };
 
     #[cfg(target_family="windows")]
-    let pause: Pause = match matches.value_of("pause").unwrap().try_into() {
+    let pause: Pause = match matches.value_of("pause-on-exit").unwrap().try_into() {
         Ok(pause) => pause,
         Err(error) => {
             eprintln!("{}", error);
@@ -645,13 +667,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 let mut paths = Vec::<PackPath>::new();
 
                 for path in path_strs {
-                    if path.starts_with('@') {
-                        // TODO: maybe also read other arguments from file? (in particular mount_point)
-                        let path = &path[1..];
-                        paths.extend(PackPath::read_from_path(path)?.into_iter());
-                    } else {
-                        paths.push(path.try_into()?);
-                    }
+                    paths.push(path.try_into()?);
                 }
 
                 paths
@@ -675,9 +691,17 @@ fn run(matches: &ArgMatches) -> Result<()> {
         ("mount", Some(_args)) => {
             panic!("mount is not implemented yet");
         }
+        ("", _) => {
+            return Err(Error::new(format!(
+                "Error: Missing sub-command!\n\
+                 \n\
+                 For more information try --help"
+            )));
+        }
         (cmd, _) => {
             return Err(Error::new(format!(
-                "unknown subcommand: {}\n\
+                "Error: Unknown subcommand: {}\n\
+                 \n\
                  For more information try --help",
                  cmd
             )));
