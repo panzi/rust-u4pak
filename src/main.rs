@@ -692,18 +692,26 @@ fn run(matches: &ArgMatches) -> Result<()> {
             panic!("mount is not implemented yet");
         }
         ("", _) => {
+            let mut buf = Vec::new();
+            make_app().write_long_help(&mut buf)?;
+            let message = std::str::from_utf8(&buf)?;
+
             return Err(Error::new(format!(
                 "Error: Missing sub-command!\n\
                  \n\
-                 For more information try --help"
+                 {}", message
             )));
         }
         (cmd, _) => {
+            let mut buf = Vec::new();
+            make_app().write_long_help(&mut buf)?;
+            let message = std::str::from_utf8(&buf)?;
+
             return Err(Error::new(format!(
                 "Error: Unknown subcommand: {}\n\
                  \n\
-                 For more information try --help",
-                 cmd
+                 {}",
+                 cmd, message
             )));
         }
     }
