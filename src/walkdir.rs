@@ -83,7 +83,7 @@ impl Iterator for WalkDir {
                 self.stack.pop();
             }
         }
-        return None;
+        None
     }
 }
 

@@ -58,10 +58,10 @@ impl TryFrom<&str> for PackPath {
 
     fn try_from(path_spec: &str) -> std::result::Result<Self, Self::Error> {
         // :zlib,level=5,block_size=512,rename=egg/spam.txt:/foo/bar/baz.txt
-        if path_spec.starts_with(':') {
-            if let Some(index) = path_spec[1..].find(':') {
-                let (param_str, filename) = path_spec.split_at(index + 2);
-                let param_str = &param_str[1..param_str.len() - 1];
+        if let Some(suffix) = path_spec.strip_prefix(':') {
+            if let Some(index) = suffix.find(':') {
+                let (param_str, filename) = suffix.split_at(index + 1);
+                let param_str = &param_str[..param_str.len() - 1];
 
                 let mut compression_method = COMPR_DEFAULT;
                 let mut compression_block_size = None;
@@ -286,10 +286,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     let file_path = entry.path();
                     let filename = make_filename(&file_path)?;
                     match work_sender.send(Work {
-                        compression_method,
-                        file_path,
                         filename,
+                        file_path,
                         path,
+                        compression_method,
                     }) {
                         Ok(()) => {}
                         Err(error) =>
@@ -300,10 +300,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                 let file_path = source_path.clone();
                 let filename = make_filename(&file_path)?;
                 match work_sender.send(Work {
-                    compression_method,
-                    file_path,
                     filename,
+                    file_path,
                     path,
+                    compression_method,
                 }) {
                     Ok(()) => {}
                     Err(error) =>

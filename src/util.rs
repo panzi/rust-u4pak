@@ -137,32 +137,32 @@ pub fn print_headless_table(body: &[Vec<impl AsRef<str>>], align: &[Align]) {
 pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>::Err> {
     let mut value = value.trim();
 
-    if value.ends_with("B") {
+    if value.ends_with('B') {
         value = &value[..value.len() - 1];
     }
 
-    if value.ends_with("K") {
+    if value.ends_with('K') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024)
-    } else if value.ends_with("M") {
+    } else if value.ends_with('M') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024)
-    } else if value.ends_with("G") {
+    } else if value.ends_with('G') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024)
-    } else if value.ends_with("T") {
+    } else if value.ends_with('T') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024)
-    } else if value.ends_with("P") {
+    } else if value.ends_with('P') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024)
-    } else if value.ends_with("E") {
+    } else if value.ends_with('E') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
-    } else if value.ends_with("Z") {
+    } else if value.ends_with('Z') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
-    } else if value.ends_with("Y") {
+    } else if value.ends_with('Y') {
         value = &value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else {
@@ -170,7 +170,7 @@ pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>:
     }
 }
 
-pub fn parse_pak_path<'a>(path: &'a str) -> impl std::iter::Iterator<Item=&'a str> {
+pub fn parse_pak_path(path: &str) -> impl std::iter::Iterator<Item=&str> {
     path.trim_matches('/')
         .split('/')
         .filter(|comp| !comp.is_empty())

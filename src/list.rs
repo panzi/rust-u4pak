@@ -147,7 +147,7 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
             }
         }
         ListStyle::OnlyNames { null_separated } => {
-            let sep = [if null_separated { 0 } else { '\n' as u8 }];
+            let sep = [if null_separated { 0 } else { b'\n' }];
             let mut stdout = std::io::stdout();
             for record in records {
                 stdout.write_all(record.as_ref().filename().as_bytes())?;

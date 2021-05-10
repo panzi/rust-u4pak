@@ -25,6 +25,16 @@ pub struct Filter<'a> {
     visited: bool,
 }
 
+impl<'a> Default for Filter<'a> {
+    fn default() -> Self {
+        Self {
+            nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
+            included: false,
+            visited: false,
+        }
+    }
+}
+
 impl<'a> Filter<'a> {
     pub fn new() -> Self {
         Self {

@@ -27,26 +27,17 @@ pub enum ErrorType {
 impl ErrorType {
     #[inline]
     pub fn is_io(&self) -> bool {
-        match self {
-            Self::IO(_) => true,
-            _ => false
-        }
+        matches!(self, Self::IO(_))
     }
 
     #[inline]
     pub fn is_message(&self) -> bool {
-        match self {
-            Self::Message(_) => true,
-            _ => false
-        }
+        matches!(self, Self::Message(_))
     }
 
     #[inline]
     pub fn is_channel_disconnected(&self) -> bool {
-        match self {
-            Self::ChannelDisconnected => true,
-            _ => false
-        }
+        matches!(self, Self::ChannelDisconnected)
     }
 }
 

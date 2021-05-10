@@ -150,7 +150,7 @@ impl Default for Options {
 }
 
 pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
-    let mut buf = [08; 4];
+    let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
     let size = u32::from_le_bytes(buf);
 

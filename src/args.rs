@@ -65,12 +65,11 @@ fn parser_error(source: &[u8], index: usize, message: impl Display) -> Error {
 pub fn parse_arg_file(source: &[u8]) -> Result<Vec<String>> {
     let mut args = vec!["u4pak".to_string()];
 
-    let mut iter = source.iter().copied().enumerate();
     let mut state = ParseState::Space;
     let mut start_index = 0usize;
     let mut buffer = String::new();
 
-    while let Some((index, byte)) = iter.next() {
+    for (index, &byte) in source.iter().enumerate() {
         match state {
             ParseState::Space => {
                 match byte {
@@ -163,7 +162,7 @@ pub fn parse_arg_file(source: &[u8]) -> Result<Vec<String>> {
                 }
             };
             buffer.push_str(value);
-            args.push(buffer.to_owned());
+            args.push(buffer);
         }
         ParseState::QuotedString => {
             let index = if let Some(&b'\n') = source.last() {
@@ -181,7 +180,7 @@ pub fn parse_arg_file(source: &[u8]) -> Result<Vec<String>> {
                 }
             };
             buffer.push_str(value);
-            args.push(buffer.to_owned());
+            args.push(buffer);
         }
     }
 

@@ -475,8 +475,8 @@ fn main() {
 fn run(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         ("info", Some(args)) => {
-            let human_readable        = args.is_present("human-readable");
-            let ignore_magic          = args.is_present("ignore-magic");
+            let human_readable = args.is_present("human-readable");
+            let ignore_magic   = args.is_present("ignore-magic");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
 
@@ -500,16 +500,12 @@ fn run(matches: &ArgMatches) -> Result<()> {
             } else {
                 None
             };
-            let order = if let Some(order) = &order {
-                Some(&order[..])
-            } else {
-                None
-            };
+            let order = order.as_ref().map(|order| &order[..]);
 
-            let human_readable        = args.is_present("human-readable");
-            let null_separated        = args.is_present("print0");
-            let only_names            = args.is_present("only-names");
-            let ignore_magic          = args.is_present("ignore-magic");
+            let human_readable = args.is_present("human-readable");
+            let null_separated = args.is_present("print0");
+            let only_names     = args.is_present("only-names");
+            let ignore_magic   = args.is_present("ignore-magic");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let paths = get_paths(args)?;
@@ -678,10 +674,10 @@ fn run(matches: &ArgMatches) -> Result<()> {
             pack(path, &paths, PackOptions {
                 version,
                 mount_point,
-                encoding,
                 compression_method,
                 compression_block_size,
                 compression_level,
+                encoding,
                 verbose,
                 null_separated,
                 thread_count,

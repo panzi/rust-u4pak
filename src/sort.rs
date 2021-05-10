@@ -104,7 +104,7 @@ impl SortKey {
     }
 }
 
-fn chain<'a>(cmp1: Box<dyn Fn(&Record, &Record) -> Ordering>, cmp2: Box<dyn Fn(&Record, &Record) -> Ordering>) -> Box<dyn Fn(&Record, &Record) -> Ordering> {
+fn chain(cmp1: Box<dyn Fn(&Record, &Record) -> Ordering>, cmp2: Box<dyn Fn(&Record, &Record) -> Ordering>) -> Box<dyn Fn(&Record, &Record) -> Ordering> {
     Box::new(move |a: &Record, b: &Record|
         match cmp1(a, b) {
             Ordering::Equal => cmp2(a, b),
