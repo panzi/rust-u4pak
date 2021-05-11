@@ -724,7 +724,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             mount(pak, file, mountpt, MountOptions {
                 foreground,
                 debug,
-            })?;
+            }).map_err(|error| error.with_path_if_none(path))?;
         }
         ("", _) => {
             let mut buf = Vec::new();
