@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "boxfnonce"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5988cb1d626264ac94100be357308f29ff7cbdd3b36bda27f450a4ee3f713426"
+
+[[package]]
 name = "cc"
 version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -79,6 +85,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "cntr-fuse"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6086675ec972930e5db2402db5456691f1023253c3e18c9a13440fc4c16a39d"
+dependencies = [
+ "cntr-fuse-abi",
+ "cntr-fuse-sys",
+ "libc",
+ "log",
+]
+
+[[package]]
+name = "cntr-fuse-abi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea6ecd4a8a57b0262d82c7521f498ecc01f60888091b1eb3b3c70ccafd2a25d"
+
+[[package]]
+name = "cntr-fuse-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfb0da5a62f5c9c384041af4d81ab52c19b0064663d0b5b6626393af20c224f9"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -106,6 +139,16 @@ dependencies = [
  "autocfg",
  "cfg-if",
  "lazy_static",
+]
+
+[[package]]
+name = "daemonize"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70c24513e34f53b640819f0ac9f705b673fcf4006d7aab8778bee72ebfc89815"
+dependencies = [
+ "boxfnonce",
+ "libc",
 ]
 
 [[package]]
@@ -155,6 +198,15 @@ name = "libc"
 version = "0.2.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18794a8ad5b29321f790b55d93dfba91e125cb1a9edbd4f8e3150acc771c1a5e"
+
+[[package]]
+name = "log"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -276,8 +328,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "cntr-fuse",
  "crossbeam-channel",
  "crossbeam-utils",
+ "daemonize",
  "flate2",
  "libc",
  "num_cpus",

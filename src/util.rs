@@ -184,6 +184,8 @@ pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<st
             path.push('/');
             path.push_str(component.as_ref());
         }
+    } else {
+        path.push('/');
     }
     path
 }

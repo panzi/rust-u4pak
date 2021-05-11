@@ -45,7 +45,7 @@ pub struct Record {
     compression_block_size: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct CompressionBlock {
     pub start_offset: u64,
     pub end_offset: u64,

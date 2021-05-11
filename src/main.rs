@@ -14,6 +14,7 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use mount::MountOptions;
 use pak::COMPR_NONE;
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
@@ -59,10 +60,14 @@ pub mod check;
 pub use check::{check, CheckOptions};
 
 pub mod walkdir;
-
 pub mod io;
 pub mod reopen;
 pub mod args;
+
+#[cfg(target_os="linux")]
+pub mod mount;
+#[cfg(target_os="linux")]
+pub use mount::mount;
 
 fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
     if let Some(arg_paths) = args.values_of("paths") {
@@ -404,12 +409,16 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .arg(arg_ignore_magic())
         .arg(arg_encoding())
         .arg(arg_force_version())
-        .arg(arg_ignore_null_checksums())
         .arg(Arg::with_name("foregound")
             .long("foreground")
             .short("f")
             .takes_value(false)
             .help("Keep process in foreground."))
+        .arg(Arg::with_name("debug")
+            .long("debug")
+            .short("g")
+            .takes_value(false)
+            .help("Debug mode. Implies --foreground."))
         .arg(arg_package())
         .arg(Arg::with_name("mountpt")
             .index(2)
@@ -684,8 +693,38 @@ fn run(matches: &ArgMatches) -> Result<()> {
             })?;
         }
         #[cfg(target_os = "linux")]
-        ("mount", Some(_args)) => {
-            panic!("mount is not implemented yet");
+        ("mount", Some(args)) => {
+            let foreground   = args.is_present("foreground");
+            let debug        = args.is_present("debug");
+            let ignore_magic = args.is_present("ignore-magic");
+            let encoding = args.value_of("encoding").unwrap().try_into()?;
+            let path = args.value_of("package").unwrap();
+            let mountpt = args.value_of("mountpt").unwrap();
+
+            let force_version = if let Some(version) = args.value_of("force-version") {
+                Some(version.parse()?)
+            } else {
+                None
+            };
+
+            let mut file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) => return Err(Error::io_with_path(error, path))
+            };
+            let mut reader = BufReader::new(&mut file);
+
+            let pak = Pak::from_reader(&mut reader, Options {
+                ignore_magic,
+                encoding,
+                force_version,
+            })?;
+
+            drop(reader);
+
+            mount(pak, file, mountpt, MountOptions {
+                foreground,
+                debug,
+            })?;
         }
         ("", _) => {
             let mut buf = Vec::new();
