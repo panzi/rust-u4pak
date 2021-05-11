@@ -507,6 +507,15 @@ pub struct MountOptions {
     pub debug: bool,
 }
 
+impl Default for MountOptions {
+    fn default() -> Self {
+        Self {
+            foreground: false,
+            debug: false,
+        }
+    }
+}
+
 impl From<DaemonizeError> for Error {
     fn from(error: DaemonizeError) -> Self {
         Error::new(error.to_string())
