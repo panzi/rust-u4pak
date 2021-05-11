@@ -208,17 +208,25 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                             let mut hasher = OpenSSLSha1::new();
 
                             for block in blocks {
-                                let block_size = block.end_offset - block.start_offset;
+                                if block.start_offset > block.end_offset {
+                                    check_error!(ok, result_sender, abort_on_error,
+                                        Error::new(format!(
+                                            "compression block start offset is bigger than end offset: {} > {}",
+                                            block.start_offset, block.end_offset,
+                                        )));
+                                } else {
+                                    let block_size = block.end_offset - block.start_offset;
 
-                                buffer.resize(block_size as usize, 0);
-                                if let Err(error) = io!{
-                                    reader.seek(SeekFrom::Start(base_offset + block.start_offset)),
-                                    reader.read_exact(&mut buffer)
-                                } {
-                                    let _ = result_sender.send(Err(Error::io_with_path(error, record.filename())));
-                                    return;
+                                    buffer.resize(block_size as usize, 0);
+                                    if let Err(error) = io!{
+                                        reader.seek(SeekFrom::Start(base_offset + block.start_offset)),
+                                        reader.read_exact(&mut buffer)
+                                    } {
+                                        let _ = result_sender.send(Err(Error::io_with_path(error, record.filename())));
+                                        return;
+                                    }
+                                    hasher.update(&buffer);
                                 }
-                                hasher.update(&buffer);
                             }
 
                             let actual_digest = hasher.finish();
