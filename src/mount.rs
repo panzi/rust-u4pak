@@ -439,7 +439,7 @@ impl Filesystem for U4PakFS {
                     pak::COMPR_ZLIB => {
                         if let Some(blocks) = compression_blocks {
                             let compression_block_size = *compression_block_size as u64;
-                            let end_offset = read_offset as u64 + read_size as u64;
+                            let end_offset = std::cmp::min(read_offset as u64 + read_size as u64, uncompressed_size);
                             let start_block_index = (read_offset as u64 / compression_block_size) as usize;
                             let end_block_index   = (end_offset         / compression_block_size) as usize;
                             let mut current_offset = compression_block_size * start_block_index as u64;
@@ -462,7 +462,7 @@ impl Filesystem for U4PakFS {
                                     }
                                     out_buffer.drain(0..read_offset as usize);
                                 } else if end_offset < current_offset + compression_block_size {
-                                    let remaining = current_offset - end_offset;
+                                    let remaining = end_offset - current_offset;
                                     let index = out_buffer.len();
                                     out_buffer.resize(index + remaining as usize, 0);
                                     if let Err(error) = zlib.read_exact(&mut out_buffer[index..]) { // TODO: maybe not read_exact()?
