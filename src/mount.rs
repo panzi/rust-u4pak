@@ -137,7 +137,7 @@ impl U4PakFS {
         let path: Vec<_> = parse_pak_path(record.filename()).collect();
 
         if path.len() > 1 {
-            for (index, name) in path[0..path.len() - 1].iter().copied().enumerate() {
+            for (index, &name) in path[0..path.len() - 1].iter().enumerate() {
                 let new_inode = self.inodes.len() as u64 + FUSE_ROOT_ID;
                 let parent_inode = &mut self.inodes[(parent - FUSE_ROOT_ID) as usize];
 
@@ -157,7 +157,7 @@ impl U4PakFS {
                             stat: FileAttr {
                                 ino:    new_inode,
                                 size:   5,
-                                blocks: 0,
+                                blocks: 1 + ((5 - 1) / self.blksize),
                                 atime:  self.atime,
                                 mtime:  self.mtime,
                                 ctime:  self.ctime,
@@ -171,6 +171,8 @@ impl U4PakFS {
                                 flags:  0,
                             },
                         });
+
+                        parent = new_inode;
                     }
                 } else {
                     return Err(Error::new(format!("{}: not a directory", make_pak_path(path[0..index].iter()))));
