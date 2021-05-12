@@ -489,6 +489,9 @@ impl Filesystem for U4PakFS {
                                 return reply.error(error.raw_os_error().unwrap_or(EIO));
                             }
 
+                            if (read_size as usize) < out_buffer.len() {
+                                return reply.data(&out_buffer[0..read_size as usize]);
+                            }
                             return reply.data(&out_buffer);
                         }
                     }
