@@ -157,7 +157,7 @@ fn arg_package<'a, 'b>() -> Arg<'a, 'b> {
         .index(1)
         .required(true)
         .value_name("PACKAGE")
-        .help("A file ending in _dir.vpk (e.g. pak01_dir.vpk)")
+        .help("An Unreal Engine 4 pak")
 }
 
 fn arg_paths<'a, 'b>() -> Arg<'a, 'b> {
@@ -267,7 +267,20 @@ impl TryFrom<&str> for Pause {
 const DEFAULT_BLOCK_SIZE_STR: &str = "65536";
 
 fn make_app<'a, 'b>() -> App<'a, 'b> {
-    let app = App::new("VPK - Valve Packages")
+    let app = App::new("U4Pak - Unreal Engine 4 Packages")
+        .about("This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \
+                Nothe that only a limited number of pak versions is supported, depending on the kinds of \
+                paks I have seen (version 1, 2, 3, 4, 7).\n\
+                \n\
+                Encryption is not supported. I haven't seen a pak file that uses encryption and I have \
+                no clue how it would work (e.g. algorithm or where to get the encrytion key from).\n\
+                \n\
+                Note that sometimes some parts of pak files are nulled out by games. In that case \
+                sometimes the options --ignore-magic and --force-version=3 (or maybe another version) \
+                may help, but usually too much of the file is nulled out and nothing can be read. \
+                In particular I've seen the whole footer to be nulled out (contains the offset of the \
+                file index). My guess would be that this information is compiled into the game binary \
+                somehow, but I have no idea how one would access that.")
         .version("1.0.0")
         .global_setting(AppSettings::VersionlessSubcommands)
         .global_setting(AppSettings::AllowExternalSubcommands)
@@ -300,6 +313,12 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .help(
                     "Only print file names. \
                     This is useful for use with xargs and the like."))
+            .arg(Arg::with_name("no-header")
+                .long("no-header")
+                .short("H")
+                .takes_value(false)
+                .conflicts_with("only-names")
+                .help("Don't print table header"))
             .arg(Arg::with_name("sort")
                 .long("sort")
                 .short("s")
@@ -315,6 +334,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                     * c, compression-method     - the compression method (zlib or none)\n\
                     * b, compression-block-size - size of blocks a compressed file is split into\n\
                     * t, timestamp              - timestamp of a file (only in pak version 1)\n\
+                    * e, encrypted              - whether the file is encrypted\n\
                     \n\
                     You can invert the sort order by prepending - to the key. E.g.:\n\
                     \n\
@@ -368,10 +388,10 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .about("Create a new package.")
             .arg(Arg::with_name("version")
                 .long("version")
-                .short("v")
+                .short("V")
                 .takes_value(true)
                 .default_value("3")
-                .help("Create package of given VERSION. Supported versions are: 1, 2, and 3"))
+                .help("Create package of given VERSION. Supported versions are: 1, 2, 3, 4 and 7 (though I'm not too sure about version 4 and 7)"))
             .arg(Arg::with_name("mount-point")
                 .long("mount-point")
                 .short("m")
@@ -515,6 +535,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let null_separated = args.is_present("print0");
             let only_names     = args.is_present("only-names");
             let ignore_magic   = args.is_present("ignore-magic");
+            let no_header      = args.is_present("no-header");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let paths = get_paths(args)?;
@@ -549,7 +570,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 style: if only_names {
                     ListStyle::OnlyNames { null_separated }
                 } else {
-                    ListStyle::Table { human_readable }
+                    ListStyle::Table { human_readable, no_header }
                 },
                 paths,
             })?;

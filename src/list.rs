@@ -17,7 +17,7 @@ use std::io::Write;
 
 use chrono::NaiveDateTime;
 
-use crate::{Filter, sort::{sort, Order}};
+use crate::{Filter, sort::{sort, Order}, util::print_headless_table};
 use crate::util::{format_size, print_table, Align::*};
 use crate::result::Result;
 use crate::record::Record;
@@ -25,7 +25,7 @@ use crate::pak::{Pak, compression_method_name, HexDisplay};
 
 #[derive(Debug, PartialEq)]
 pub enum ListStyle {
-    Table { human_readable: bool },
+    Table { human_readable: bool, no_header: bool },
     OnlyNames { null_separated: bool },
 }
 
@@ -45,7 +45,7 @@ impl ListOptions<'_> {
 impl Default for ListStyle {
     #[inline]
     fn default() -> Self {
-        ListStyle::Table { human_readable: false }
+        ListStyle::Table { human_readable: false, no_header: false }
     }
 }
 
@@ -100,8 +100,8 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
 
 fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptions) -> Result<()> {
     match options.style {
-        ListStyle::Table { human_readable } => {
-            let mut table: Vec<Vec<String>> = Vec::new();
+        ListStyle::Table { human_readable, no_header } => {
+            let mut body: Vec<Vec<String>> = Vec::new();
 
             let fmt_size = if human_readable {
                 |size: u64| format_size(size)
@@ -128,22 +128,47 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
                     } else {
                         row.push("-".to_string());
                     }
+                } else if version >= 3 {
+                    row.push(if record.encrypted() { "Encrypted" } else { "-" }.to_string());
                 }
                 row.push(HexDisplay::new(record.sha1()).to_string());
                 row.push(record.filename().to_owned());
-                table.push(row);
+                body.push(row);
             }
 
             if version == 1 {
-                print_table(
-                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "Timestamp", "SHA-1", "Filename"],
-                    &[Right,    Right,  Right,        Left,           Right,              Left,        Left,    Left],
-                    &table);
+                let align = [Right, Right, Right, Left, Right, Left, Left, Left];
+                if no_header {
+                    print_headless_table(&body, &align);
+                } else {
+                    print_table(
+                        &["Offset", "Size", "Compr.", "Method", "Block-Size", "Timestamp", "SHA-1", "Filename"],
+                        &align,
+                        &body,
+                    );
+                }
+            } else if version >= 3 {
+                let align = [Right, Right, Right, Left, Right, Left, Left, Left];
+                if no_header {
+                    print_headless_table(&body, &align);
+                } else {
+                    print_table(
+                        &["Offset", "Size", "Compr.", "Method", "Block-Size", "Encrypted", "SHA-1", "Filename"],
+                        &align,
+                        &body,
+                    );
+                }
             } else {
-                print_table(
-                    &["Offset", "Size", "Compr-Size", "Compr-Method", "Compr-Block-Size", "SHA-1", "Filename"],
-                    &[Right,    Right,  Right,        Left,           Right,              Left,    Left],
-                    &table);
+                let align = [Right, Right, Right, Left, Right, Left, Left];
+                if no_header {
+                    print_headless_table(&body, &align);
+                } else {
+                    print_table(
+                        &["Offset", "Size", "Compr.", "Method", "Block-Size", "SHA-1", "Filename"],
+                        &align,
+                        &body,
+                    );
+                }
             }
         }
         ListStyle::OnlyNames { null_separated } => {

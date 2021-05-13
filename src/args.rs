@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs::File, io::Read};
+use std::{fmt::Display, fs::File, io::Read, path::PathBuf};
 
 use crate::{Error, Result};
 
@@ -62,8 +62,8 @@ fn parser_error(source: &[u8], index: usize, message: impl Display) -> Error {
     Error::new(message)
 }
 
-pub fn parse_arg_file(source: &[u8]) -> Result<Vec<String>> {
-    let mut args = vec!["u4pak".to_string()];
+pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
+    let mut args = vec![bin_name];
 
     let mut state = ParseState::Space;
     let mut start_index = 0usize;
@@ -188,12 +188,18 @@ pub fn parse_arg_file(source: &[u8]) -> Result<Vec<String>> {
 }
 
 pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
-    let args = std::env::args();
+    let mut args = std::env::args();
     if args.len() != 2 {
         return Ok(None);
     }
 
-    let path = if let Some(arg) = args.last() {
+    let bin_name = if let Some(arg) = args.next() {
+        arg
+    } else {
+        return Ok(None);
+    };
+
+    let path = if let Some(arg) = args.next() {
         if let Some(index) = arg.rfind('.') {
             if arg[index + 1..].eq_ignore_ascii_case("u4pak") {
                 arg
@@ -207,6 +213,7 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
         return Ok(None);
     };
 
+    let path = PathBuf::from(path);
     let mut file = match File::open(&path) {
         Ok(file) => file,
         Err(error) => return Err(Error::io_with_path(error, path))
@@ -217,8 +224,14 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
         Err(error) => return Err(Error::io_with_path(error, path))
     }
 
-    match parse_arg_file(&source) {
-        Ok(args) => Ok(Some(args)),
+    match parse_arg_file(bin_name, &source) {
+        Ok(args) => {
+            if let Some(path) = path.parent() {
+                // so that relative paths inside of the .u4pak file work
+                std::env::set_current_dir(path)?;
+            }
+            Ok(Some(args))
+        },
         Err(error) => Err(error.with_path(path))
     }
 }

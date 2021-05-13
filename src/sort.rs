@@ -28,6 +28,7 @@ pub enum SortKey {
     UncomprSize,
     ComprBlockSize,
     Timestamp,
+    Encrypted,
 
     RevName,
     RevOffset,
@@ -36,6 +37,7 @@ pub enum SortKey {
     RevUncomprSize,
     RevComprBlockSize,
     RevTimestamp,
+    RevEncrypted,
 }
 
 pub type Order = [SortKey];
@@ -61,6 +63,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::ComprBlockSize)
         } else if value.eq_ignore_ascii_case("t") || value.eq_ignore_ascii_case("timestamp") {
             Ok(SortKey::Timestamp)
+        } else if value.eq_ignore_ascii_case("e") || value.eq_ignore_ascii_case("encrypted") {
+            Ok(SortKey::Encrypted)
         } else if value.eq_ignore_ascii_case("-p") || value.eq_ignore_ascii_case("-name") || value.eq_ignore_ascii_case("-path") || value.eq_ignore_ascii_case("-filename") {
             Ok(SortKey::RevName)
         } else if value.eq_ignore_ascii_case("-s") || value.eq_ignore_ascii_case("-size") || value.eq_ignore_ascii_case("-compressed-size") {
@@ -75,6 +79,8 @@ impl TryFrom<&str> for SortKey {
             Ok(SortKey::RevComprBlockSize)
         } else if value.eq_ignore_ascii_case("-t") ||value.eq_ignore_ascii_case("-timestamp") {
             Ok(SortKey::RevTimestamp)
+        } else if value.eq_ignore_ascii_case("-e") || value.eq_ignore_ascii_case("-encrypted") {
+            Ok(SortKey::RevEncrypted)
         } else {
             Err(Error::new(format!("illegal argument --sort={:?}", value)))
         }
@@ -92,6 +98,7 @@ impl SortKey {
             SortKey::UncomprSize       => |a: &Record, b: &Record| a.uncompressed_size().cmp(&b.uncompressed_size()),
             SortKey::ComprBlockSize    => |a: &Record, b: &Record| a.compression_block_size().cmp(&b.compression_block_size()),
             SortKey::Timestamp         => |a: &Record, b: &Record| a.timestamp().cmp(&b.timestamp()),
+            SortKey::Encrypted         => |a: &Record, b: &Record| a.encrypted().cmp(&b.encrypted()),
 
             SortKey::RevName           => |a: &Record, b: &Record| b.filename().cmp(&a.filename()),
             SortKey::RevSize           => |a: &Record, b: &Record| b.size().cmp(&a.size()),
@@ -100,6 +107,7 @@ impl SortKey {
             SortKey::RevUncomprSize    => |a: &Record, b: &Record| b.uncompressed_size().cmp(&a.uncompressed_size()),
             SortKey::RevComprBlockSize => |a: &Record, b: &Record| b.compression_block_size().cmp(&a.compression_block_size()),
             SortKey::RevTimestamp      => |a: &Record, b: &Record| b.timestamp().cmp(&a.timestamp()),
+            SortKey::RevEncrypted      => |a: &Record, b: &Record| b.encrypted().cmp(&a.encrypted()),
         }
     }
 }
