@@ -16,4 +16,5 @@ TODO
 * [x] pack
 * [x] multithreading
 * [x] option to read arguments from text file for Windows users that can't handle a terminal
-* [ ] mount
+* [x] mount
+* [ ] write good README and make a release
