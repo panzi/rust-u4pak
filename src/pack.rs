@@ -161,6 +161,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         2 => Record::write_v2_inline,
         3 => Record::write_v3_inline,
         4 => Record::write_v3_inline, // maybe?
+        5 => Record::write_v3_inline, // maybe?
         7 => Record::write_v3_inline, // maybe?
         _ => {
             return Err(Error::new(
@@ -374,6 +375,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         2 => Record::write_v2,
         3 => Record::write_v3,
         4 => Record::write_v3, // maybe?
+        5 => Record::write_v3, // maybe?
         7 => Record::write_v3, // maybe?
         _ => {
             return Err(Error::new(
@@ -486,6 +488,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
         2 => V2_RECORD_HEADER_SIZE,
         3 => V3_RECORD_HEADER_SIZE,
         4 => V3_RECORD_HEADER_SIZE, // maybe?
+        5 => V3_RECORD_HEADER_SIZE, // maybe?
         7 => V3_RECORD_HEADER_SIZE, // maybe?
         _ => {
             panic!("unsupported version: {}", options.version)

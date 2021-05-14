@@ -132,7 +132,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
     let read_record = match version {
         1 => Record::read_v1,
         2 => Record::read_v2,
-        _ if version <= 4 || version == 7 => Record::read_v3,
+        _ if version <= 5 || version == 7 => Record::read_v3,
         _ => {
             return Err(Error::new(format!("unsupported version: {}", version)));
         }

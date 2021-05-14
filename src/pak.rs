@@ -223,7 +223,7 @@ impl Pak {
         let read_record = match version {
             1 => Record::read_v1,
             2 => Record::read_v2,
-            _ if version <= 4 || version == 7 => Record::read_v3,
+            _ if version <= 5 || version == 7 => Record::read_v3,
             _ => {
                 return Err(Error::new(format!("unsupported version: {}", version)));
             }
@@ -310,7 +310,7 @@ impl Pak {
         match version {
             1 => V1_RECORD_HEADER_SIZE,
             2 => V2_RECORD_HEADER_SIZE,
-            _ if version <= 4 || version == 7 => {
+            _ if version <= 5 || version == 7 => {
                 let mut size: u64 = V3_RECORD_HEADER_SIZE;
                 if let Some(blocks) = &record.compression_blocks() {
                     size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
