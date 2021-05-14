@@ -16,7 +16,6 @@
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use terminal_size::{terminal_size, Width};
 
-use mount::MountOptions;
 use pak::COMPR_NONE;
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
@@ -69,7 +68,7 @@ pub mod args;
 #[cfg(target_os="linux")]
 pub mod mount;
 #[cfg(target_os="linux")]
-pub use mount::mount;
+pub use mount::{mount, MountOptions};
 
 fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
     if let Some(arg_paths) = args.values_of("paths") {

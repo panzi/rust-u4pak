@@ -27,15 +27,20 @@ cargo build
     done
 } > "$release_dir/Help.txt"
 
-cp README.md LICENSE.txt "$release_dir"
+pandoc -f markdown -t html5 -o "$release_dir/README.html" README.md
+cp LICENSE.txt "$release_dir"
 
 for target in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu; do
     cargo clean --release --target="$target"
-    cargo --release --target="$target"
+    cargo build --release --target="$target"
     mkdir "$release_dir/$target"
-    cp "./target/$target/u4pak" "$release_dir/$target"
+    if [[ "$target" =~ .*windows.* ]]; then
+        cp "./target/$target/release/u4pak.exe" "$release_dir/$target"
+    else
+        cp "./target/$target/release/u4pak" "$release_dir/$target"
+    fi
 done
 
-pushdir "$release_dir"
+pushd "$release_dir"
 zip -9r "$DIR/release-$release_id.zip" .
-popdir
+popd
