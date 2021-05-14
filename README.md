@@ -73,15 +73,15 @@ u4pak "C:\Path\to\arguments.u4pak"
 
 ### Sub-Commands
 
-| Sub-Command | Description                                                |
-| ----------- | ---------------------------------------------------------- |
-| check       | Check consistency of a package                             |
-| help        | Prints this message or the help of the given subcommand(s) |
-| info        | Show summarized information of a package                   |
-| list        | List content of a package                                  |
-| mount       | Mount package as read-only filesystem (Linux-only)         |
-| pack        | Create a new package                                       |
-| unpack      | Unpack content of a package                                |
+| Sub-Command | Description                                                        |
+| ----------- | ------------------------------------------------------------------ |
+| check       | Check consistency of a package                                     |
+| help        | Prints general help message or the help of the given subcommand(s) |
+| info        | Show summarized information of a package                           |
+| list        | List content of a package                                          |
+| mount       | Mount package as read-only filesystem (Linux-only)                 |
+| pack        | Create a new package                                               |
+| unpack      | Unpack content of a package                                        |
 
 For help to the various sub-commands run `u4pak help SUBCOMMAND`.
 
