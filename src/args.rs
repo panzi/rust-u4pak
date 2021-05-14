@@ -201,8 +201,11 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
 
     let path = if let Some(arg) = args.next() {
         if let Some(index) = arg.rfind('.') {
-            if arg[index + 1..].eq_ignore_ascii_case("u4pak") {
+            let ext = &arg[index + 1..];
+            if ext.eq_ignore_ascii_case("u4pak") {
                 arg
+            } else if ext.eq_ignore_ascii_case("pak") {
+                return Ok(Some(vec![bin_name, "info".to_string(), "-h".to_string(), arg]));
             } else {
                 return Ok(None);
             }
@@ -227,8 +230,12 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
     match parse_arg_file(bin_name, &source) {
         Ok(args) => {
             if let Some(path) = path.parent() {
-                // so that relative paths inside of the .u4pak file work
-                std::env::set_current_dir(path)?;
+                // no components means the file path was relative to the current directory
+                // and passing an empty path to set_current_dir() gives an error
+                if path.components().count() > 0 {
+                    // so that relative paths inside of the .u4pak file work
+                    std::env::set_current_dir(path)?;
+                }
             }
             Ok(Some(args))
         },

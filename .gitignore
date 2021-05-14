@@ -7,5 +7,6 @@
 /perf.data
 /perf.data.old
 /dump
+/release
 !.keep
 !.gitignore

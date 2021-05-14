@@ -14,6 +14,8 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use terminal_size::{terminal_size, Width};
+
 use mount::MountOptions;
 use pak::COMPR_NONE;
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
@@ -157,7 +159,7 @@ fn arg_package<'a, 'b>() -> Arg<'a, 'b> {
         .index(1)
         .required(true)
         .value_name("PACKAGE")
-        .help("An Unreal Engine 4 pak")
+        .help("An Unreal Engine 4 pak file")
 }
 
 fn arg_paths<'a, 'b>() -> Arg<'a, 'b> {
@@ -180,7 +182,7 @@ fn arg_ignore_magic<'a, 'b>() -> Arg<'a, 'b> {
     Arg::with_name("ignore-magic")
         .long("ignore-magic")
         .takes_value(false)
-        .help("Ignore file magic")
+        .help("Ignore file magic.")
 }
 
 fn arg_encoding<'a, 'b>() -> Arg<'a, 'b> {
@@ -200,7 +202,9 @@ fn arg_threads<'a, 'b>() -> Arg<'a, 'b> {
         .takes_value(true)
         .default_value("auto")
         .value_name("COUNT")
-        .help("Number of threads to use.")
+        .help(
+            "Number of threads to use for the operation. \
+            'auto' means use the number of logical cores on your computer.")
 }
 
 fn arg_force_version<'a, 'b>() -> Arg<'a, 'b> {
@@ -267,20 +271,60 @@ impl TryFrom<&str> for Pause {
 const DEFAULT_BLOCK_SIZE_STR: &str = "65536";
 
 fn make_app<'a, 'b>() -> App<'a, 'b> {
+    let width = if let Some((Width(width), _)) = terminal_size() {
+        width as usize
+    } else {
+        120
+    };
+
     let app = App::new("U4Pak - Unreal Engine 4 Packages")
-        .about("This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \
-                Nothe that only a limited number of pak versions is supported, depending on the kinds of \
+        .set_term_width(width)
+        .about("\n\
+                This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \
+                Note that only a limited number of pak versions are supported, depending on the kinds of \
                 paks I have seen (version 1, 2, 3, 4, 7).\n\
                 \n\
                 Encryption is not supported. I haven't seen a pak file that uses encryption and I have \
-                no clue how it would work (e.g. algorithm or where to get the encrytion key from).\n\
+                no clue how it would work (e.g. what is the algorithm or where to get the encrytion key \
+                from).\n\
                 \n\
-                Note that sometimes some parts of pak files are nulled out by games. In that case \
+                Note that sometimes some parts of pak files are zeroed out by games. In that case \
                 sometimes the options --ignore-magic and --force-version=3 (or maybe another version) \
-                may help, but usually too much of the file is nulled out and nothing can be read. \
-                In particular I've seen the whole footer to be nulled out (contains the offset of the \
+                may help, but usually too much of the file is zeroed out and nothing can be read. \
+                In particular I've seen the whole footer to be zeroed out (contains the offset of the \
                 file index). My guess would be that this information is compiled into the game binary \
-                somehow, but I have no idea how one would access that.")
+                somehow, but I have no idea how one would access that.\n\
+                \n\
+                Instead of passing arguments you can also put the arguments in a file with the extension \
+                .u4pak and pass the path to that instead. This is useful for Windows users that aren't \
+                used to a terminal. You can even associate the extension with u4pak.exe so that it will \
+                be automatically opened with it when you double click it. File paths in a .u4pak file are \
+                relative to the directory containing the file. The syntax of these files is not shell \
+                syntax. If you don't have any white space, double quotes (\"), or hash marks (#) in your \
+                file names you don't have to worry about anything. # is used to start a comment line (only \
+                if it doesn't touch any non-white space on it's left) and \" is used to quote arguments \
+                containing white space, #, or \". In order to write a \" in an quoted argument you simply \
+                need to double it, meaning an argument that contains nothing but a single \" is written \
+                as \"\"\"\". Newlines are ignored like any other white space. An example .u4pak file \
+                whould be:\n\
+                \n\
+                \t# This is packing my project:\n\
+                \tpack\n\
+                \t--version=4\n\
+                \t--mount-point=../../..\n\
+                \t\n\
+                \t\":rename=/:C:\\Users\\Alice\\My Documents\\U4Project\\Some Files\"\n\
+                \t\":zlib,rename=/:Some Other Files\"\n\
+                \n\
+                If u4pak.exe is run by double clicking or by dropping a .u4pak file on it it won't \
+                immediately close the terminal window, but will instead ask you to press ENTER. It does \
+                this so you have a chance to read the output. Since I don't use Windows (I cross compile \
+                on Linux and test with Wine) I could not test this particular feature. It it doesn't work \
+                please report a bug. In order to force the \"Press ENTER to continue...\" message you can \
+                pass the argument --pause-on-exit=always (Windows-only).\n\
+                \n\
+                Homepage: https://github.com/panzi/rust-u4pak\n\
+                Report issues to: https://github.com/panzi/rust-u4pak/issues")
         .version("1.0.0")
         .global_setting(AppSettings::VersionlessSubcommands)
         .global_setting(AppSettings::AllowExternalSubcommands)
@@ -297,7 +341,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
     let app = app
         .subcommand(SubCommand::with_name("info")
             .alias("i")
-            .about("Show summarized information of a package.")
+            .about("Show summarized information of a package")
             .arg(arg_human_readable())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -305,7 +349,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_package()))
         .subcommand(SubCommand::with_name("list")
             .alias("l")
-            .about("List content of a package.")
+            .about("List content of a package")
             .arg(Arg::with_name("only-names")
                 .long("only-names")
                 .short("n")
@@ -350,7 +394,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("check")
             .alias("c")
-            .about("Check concistency of a package.")
+            .about("Check consistency of a package")
             .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -362,7 +406,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("unpack")
             .alias("u")
-            .about("Unpack content of a package.")
+            .about("Unpack content of a package")
             .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -373,7 +417,9 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .long("dirname-from-compression")
                 .short("d")
                 .takes_value(false)
-                .help("Put files that where compressed into separate folders."))
+                .help(
+                    "Put files that where compressed into separate folders. \
+                     The folder names will be 'none' and 'zlib'."))
             .arg(Arg::with_name("outdir")
                 .long("outdir")
                 .short("o")
@@ -385,32 +431,43 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_paths()))
         .subcommand(SubCommand::with_name("pack")
             .alias("p")
-            .about("Create a new package.")
+            .about("Create a new package")
             .arg(Arg::with_name("version")
                 .long("version")
                 .short("V")
                 .takes_value(true)
                 .default_value("3")
-                .help("Create package of given VERSION. Supported versions are: 1, 2, 3, 4 and 7 (though I'm not too sure about version 4 and 7)"))
+                .help(
+                    "Create package of given VERSION. Supported versions are: 1, 2, 3, 4 and 7 \
+                    (though I'm not too sure about version 4 and 7)"))
             .arg(Arg::with_name("mount-point")
                 .long("mount-point")
                 .short("m")
-                .takes_value(true))
+                .takes_value(true)
+                .help("Mount-point field of the package."))
             .arg(Arg::with_name("compression-method")
                 .long("compression-method")
                 .short("c")
                 .takes_value(true)
-                .default_value("none"))
+                .default_value("none")
+                .help(
+                    "Default compression method. Note that files <= 100 bytes are never \
+                    compressed because the compression overhead would make them actually \
+                    bigger. Maybe this limit might be even raised."))
             .arg(Arg::with_name("compression-block-size")
                 .long("compression-block-size")
                 .short("b")
                 .takes_value(true)
-                .default_value(DEFAULT_BLOCK_SIZE_STR))
+                .default_value(DEFAULT_BLOCK_SIZE_STR)
+                .help("Default compresison block size."))
             .arg(Arg::with_name("compression-level")
                 .long("compression-level")
                 .short("l")
                 .takes_value(true)
-                .default_value("default"))
+                .default_value("default")
+                .help(
+                    "Default compression level. Allowed values are the integers from 1 to 9, \
+                    or the strings 'fast' (=1), 'best' (=9), and 'default' (=6)."))
             .arg(arg_encoding())
             .arg(arg_print0())
             .arg(arg_threads())
@@ -420,12 +477,43 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .index(2)
                 .multiple(true)
                 .value_name("PATH")
-                .help("Pack these files.")));
+                .help(
+                    "Pack these files or directories. You can overload certain settings for a path using a special syntax, e.g.:\n\
+                    \n\
+                    Linux/Unix:\n\
+                    \tu4pak pack Archive.pak :zlib,level=7,block_size=65536,rename=/Foo/Bar:/Some/Folder\n\
+                    \n\
+                    Windows:\n\
+                    \tu4pak pack Archive.pak :zlib,level=7,block_size=65536,rename=/Foo/Bar:C:\\Some\\Folder\n\
+                    \n\
+                    This means add the fiels from the folder '/Some/Folder' ('C:\\Some\\Folder') \
+                    from your hard disk, use zlib compression at compression level 7 with a \
+                    compression block size of 65536 bytes, and rename the folder to be 'Foo/Bar' \
+                    inside of the pak archive file.\n\
+                    \n\
+                    Instead of 'zlib' you can also write 'none' to not compress the files from the \
+                    given path. If you don't say any of either the default value provided by \
+                    --compression-method is used. Same goes for all the other parameters. \
+                    If you don't specify 'rename' then the same path is used for the folder inside \
+                    of the pak archive as the files on your hard disk have.\n\
+                    \n\
+                    This is handy if you want to compress some files, but not all:\n\
+                    \tu4pak pack Archive.pak :zlib,rename=/:ZlibFiles :none,rename=/:UncompressedFiles
+                    \n\
+                    If the default parameters are all you need (and you provide relative paths \
+                    that don't need renaming) you can simply say e.g.:\n\
+                    \n\
+                    Linux/Unix:\n\
+                    \tu4pak pack Archive.pak Some/Folder\n\
+                    \n\
+                    Windows:\n\
+                    \tu4pak pack Archive.pak Some\\Folder\n\
+                    ")));
 
     #[cfg(target_os = "linux")]
     let app = app.subcommand(SubCommand::with_name("mount")
         .alias("m")
-        .about("Mount package as read-only filesystem.")
+        .about("Mount package as read-only filesystem")
         .arg(arg_ignore_magic())
         .arg(arg_encoding())
         .arg(arg_force_version())
