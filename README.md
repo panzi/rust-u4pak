@@ -85,6 +85,110 @@ u4pak "C:\Path\to\arguments.u4pak"
 
 For help to the various sub-commands run `u4pak help SUBCOMMAND`.
 
+File Format
+-----------
+
+Byte order is little endian and the character encoding of file names seems to be
+ASCII (or ISO-8859-1/UTF-8 that coincidentally only uses ASCII compatiple
+characters).
+
+Offsets and sizes seem to be 64bit or at least unsigned 32bit integers. If
+interpreted as 32bit integers all sizes (except the size of file names) and offsets
+are followed by another 32bit integer of the value 0, which makes me guess these
+are 64bit values. Also some values exceed the range of signed 32bit integers, so
+they have to be at least unsigned 32bit integers. This information was reverse
+engineered from the Elemental [Demo](https://wiki.unrealengine.com/Linux_Demos)
+for Linux (which contains a 2.5 GB .pak file).
+
+Basic layout:
+
+* Data Records
+* Index
+  * Index Header
+  * Index Records
+* Footer
+
+In order to parse a file you need to read the footer first. The footer contains
+an offset pointer to the start of the index records. The index records then
+contain offset pointers to the data records.
+
+Some games seem to zero out parts of the file. In particular the footer, which
+makes it pretty much impossible to read the file without manual analysis and
+guessing. I suspect these games have the footer included somewhere in the game
+binary. If it's not obfuscated one might be able to find it using the file
+magic (given that the file magic is even included)?
+
+### Record
+
+    Offset  Size  Type         Description
+         0     8  uint64_t     offset
+         8     8  uint64_t     size (N)
+        16     8  uint64_t     uncompressed size
+        24     4  uint32_t     compression method:
+                                  0x00 ... none
+                                  0x01 ... zlib
+                                  0x10 ... bias memory
+                                  0x20 ... bias speed
+    if version <= 1
+        28     8  uint64_t     timestamp
+    end
+         ?    20  uint8_t[20]  data sha1 hash
+    if version >= 3
+     if compression method != 0x00
+      ?+20     4  uint32_t     block count (M)
+      ?+24  M*16  CB[M]        compression blocks
+     end
+         ?     1  uint8_t      is encrypted
+       ?+1     4  uint32_t     The uncompressed size of each compression block.
+    end                        The last block can be smaller, of course.
+
+### Compression Block (CB)
+
+Size: 16 bytes
+
+    Offset  Size  Type         Description
+         0     8  uint64_t     compressed data block start offset.
+                               version <= 4: offset is absolute to the file
+                               version 7: offset is relative to the offset
+                                          field in the corresponding Record
+         8     8  uint64_t     compressed data block end offset.
+                               There may or may not be a gap between blocks.
+                               version <= 4: offset is absolute to the file
+                               version 7: offset is relative to the offset
+                                          field in the corresponding Record
+
+### Data Record
+
+    Offset  Size  Type            Description
+         0     ?  Record          file metadata (offset field is 0, N = compressed_size)
+         ?     N  uint8_t[N]      file data
+
+### Index Record
+
+    Offset  Size  Type            Description
+         0     4  uint32_t        file name size (S)
+         4     S  char[S]         file name (includes terminating null byte)
+       4+S     ?  Record          file metadata
+
+### Index
+
+    Offset  Size  Type            Description
+         0     4  uint32_t        mount point size (S)
+         4     S  char[S]         mount point (includes terminating null byte)
+       S+4     4  uint32_t        record count (N)
+       S+8     ?  IndexRecord[N]  records
+
+### Footer
+
+Size: 44 bytes
+
+    Offset  Size  Type         Description
+         0     4  uint32_t     magic: 0x5A6F12E1
+         4     4  uint32_t     version: 1, 2, 3, 4, or 7
+         8     8  uint64_t     index offset
+        16     8  uint64_t     index size
+        24    20  uint8_t[20]  index sha1 hash
+
 Related Projects
 ----------------
 
