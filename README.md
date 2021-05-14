@@ -35,7 +35,7 @@ file. The syntax of these files is not shell syntax. If you don't have any white
 space, double quotes (`"`), or hash marks (`#`) in your file names you don't have to
 worry about anything. `#` is used to start a comment line (only if it doesn't
 touch any non-white space on it's left) and `"` is used to quote arguments
-containing white space, `#`, or `"`. In order to write a `"` in an quoted argument you
+containing white space, `#`, or `"`. In order to write a `"` in a quoted argument you
 simply need to double it, meaning an argument that contains nothing but a single
 `"` is written as `""""`. Newlines are ignored like any other white space. An
 example .u4pak file whould be:
@@ -54,7 +54,7 @@ If u4pak.exe is run by double clicking or by dropping a .u4pak file on it it
 won't immediately close the terminal window, but will instead ask you to press
 ENTER. It does this so you have a chance to read the output. Since I don't use
 Windows (I cross compile on Linux and test with Wine) I could not test this
-particular feature. It it doesn't work please report a bug. In order to force
+particular feature. If it doesn't work please report a bug. In order to force
 the "Press ENTER to continue..." message you can pass the argument
 `--pause-on-exit=always` (Windows-only).
 
@@ -62,12 +62,18 @@ Usage
 -----
 
 ```sh
-u4pak [SUBCOMMAND]
+u4pak [--pause-on-exit=<always|never|auto>] [SUBCOMMAND]
+```
+
+Or:
+
+```sh
+u4pak "C:\Path\to\arguments.u4pak"
 ```
 
 ### Sub-Commands
 
-| sub-command | Description                                                |
+| Sub-Command | Description                                                |
 | ----------- | ---------------------------------------------------------- |
 | check       | Check consistency of a package                             |
 | help        | Prints this message or the help of the given subcommand(s) |
