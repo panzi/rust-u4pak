@@ -326,7 +326,6 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 Report issues to: https://github.com/panzi/rust-u4pak/issues")
         .version("1.0.0")
         .global_setting(AppSettings::VersionlessSubcommands)
-        .global_setting(AppSettings::AllowExternalSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
     #[cfg(target_family="windows")]
