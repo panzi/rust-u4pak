@@ -14,6 +14,10 @@ if [[ -e "$release_dir" ]]; then
     rm -r "$release_dir"
 fi
 
+if [[ -e "$DIR/release-$release_id.zip" ]]; then
+    rm "$DIR/release-$release_id.zip"
+fi
+
 mkdir -p "$release_dir"
 
 cargo build
