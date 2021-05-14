@@ -67,7 +67,7 @@ u4pak [SUBCOMMAND]
 
 ### Sub-Commands
 
-| sub-command |                                                            |
+| sub-command | Description                                                |
 | ----------- | ---------------------------------------------------------- |
 | check       | Check consistency of a package                             |
 | help        | Prints this message or the help of the given subcommand(s) |
@@ -94,6 +94,7 @@ GPLv3 License
 -------------
 
 Rust U4Pak - pack, unpack, check, list and mount Unreal Engine 4 packages
+
 Copyright (C) 2021 Mathias Panzenböck
 
 [rust-u4pak](https://github.com/panzi/rust-u4pak) is free software: you can
