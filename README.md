@@ -13,6 +13,11 @@ Encryption is not supported. I haven't seen a pak file that uses encryption and
 I have no clue how it would work (e.g. what is the algorithm or where to get the
 encrytion key from).
 
+**NOTE:** If you know (cheap) games that use other archive versions please tell me!
+Especially if its 5 or 6. There is a change in how certain offsets are handled at
+some point, but since I only have an example file of version 7 I don't know if it
+happened in version 5, 6, or 7.
+
 Note that sometimes some parts of pak files are zeroed out by games. In that
 case sometimes the options `--ignore-magic` and `--force-version=3` (or maybe
 another version) may help, but usually too much of the file is zeroed out and
