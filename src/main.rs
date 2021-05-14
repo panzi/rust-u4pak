@@ -277,7 +277,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         120
     };
 
-    let app = App::new("U4Pak - Unreal Engine 4 Packages")
+    let app = App::new("Rust U4Pak")
         .set_term_width(width)
         .about("\n\
                 This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \

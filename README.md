@@ -74,19 +74,6 @@ u4pak [SUBCOMMAND]
 
 For help to the various sub-commands run `u4pak help SUBCOMMAND`.
 
-TODO
-----
-
-* [x] info
-* [x] list
-* [x] check
-* [x] unpack
-* [x] pack
-* [x] multithreading
-* [x] option to read arguments from text file for Windows users that can't handle a terminal
-* [x] mount
-* [x] write good README and make a release
-
 Related Projects
 ----------------
 
@@ -100,6 +87,9 @@ Related Projects
 
 GPLv3 License
 -------------
+
+Rust U4Pak - pack, unpack, check, list and mount Unreal Engine 4 packages
+Copyright (C) 2021 Mathias Panzenböck
 
 [rust-u4pak](https://github.com/panzi/rust-u4pak) is free software: you can
 redistribute it and/or modify it under the terms of the GNU General Public
