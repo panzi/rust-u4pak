@@ -333,7 +333,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 \n\
                 Homepage: https://github.com/panzi/rust-u4pak\n\
                 Report issues to: https://github.com/panzi/rust-u4pak/issues")
-        .version("1.0.0")
+        .version("1.1.0")
         .global_setting(AppSettings::VersionlessSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
