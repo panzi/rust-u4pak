@@ -23,7 +23,7 @@ use fuse::{Filesystem, FileType, Request, ReplyEntry, FileAttr, ReplyAttr, Reply
 use daemonize::{Daemonize, DaemonizeError};
 use libc::{ENOENT, EISDIR, EACCES, ENOTDIR, EINVAL, EIO, ENOSYS, O_RDONLY};
 
-use crate::{Error, Pak, Record, Result, pak, record::CompressionBlock, util::{make_pak_path, parse_pak_path}};
+use crate::{Error, Pak, Record, Result, pak::{self, Variant}, record::CompressionBlock, util::{make_pak_path, parse_pak_path}};
 
 #[derive(Debug)]
 enum INodeData {
@@ -120,8 +120,9 @@ impl U4PakFS {
         });
 
         let version = pak.version();
+        let variant = pak.variant();
         for record in pak.records() {
-            u4pakfs.insert(version, record)?;
+            u4pakfs.insert(variant, version, record)?;
         }
 
         Ok(u4pakfs)
@@ -132,7 +133,7 @@ impl U4PakFS {
         self.inodes.get((inode - FUSE_ROOT_ID) as usize)
     }
 
-    fn insert(&mut self, version: u32, record: &Record) -> Result<u64> {
+    fn insert(&mut self, variant: Variant, version: u32, record: &Record) -> Result<u64> {
         let mut parent = FUSE_ROOT_ID;
         let path: Vec<_> = parse_pak_path(record.filename()).collect();
 
@@ -230,7 +231,7 @@ impl U4PakFS {
                     parent,
                     inode: new_inode,
                     data: INodeData::File {
-                        offset: offset + pak::Pak::header_size(version, record),
+                        offset: offset + pak::Pak::header_size(version, variant, record),
                         size: record.size(),
                         uncompressed_size,
                         compression_method: record.compression_method(),
@@ -440,13 +441,17 @@ impl Filesystem for U4PakFS {
                         if let Some(blocks) = compression_blocks {
                             let compression_block_size = *compression_block_size as u64;
                             let end_offset = std::cmp::min(read_offset as u64 + read_size as u64, uncompressed_size);
-                            let start_block_index = (read_offset as u64 / compression_block_size) as usize;
-                            let end_block_index   = (end_offset         / compression_block_size) as usize;
-                            let mut current_offset = compression_block_size * start_block_index as u64;
+                            let start_block_index   = (read_offset as u64 / compression_block_size) as usize;
+                            let mut end_block_index = (end_offset         / compression_block_size) as usize;
 
+                            if end_offset % compression_block_size != 0 {
+                                end_block_index += 1;
+                            }
+
+                            let mut current_offset = compression_block_size * start_block_index as u64;
                             let mut in_buffer = Vec::new();
                             let mut out_buffer = Vec::new();
-                            for block in &blocks[start_block_index..end_block_index + 1] {
+                            for block in &blocks[start_block_index..end_block_index] {
                                 let block_size = block.end_offset - block.start_offset;
                                 in_buffer.resize(block_size as usize, 0);
                                 if let Err(error) = self.file.read_exact_at(&mut in_buffer, block.start_offset) {
@@ -457,7 +462,7 @@ impl Filesystem for U4PakFS {
 
                                 if current_offset < read_offset as u64 {
                                     out_buffer.resize(std::cmp::min(compression_block_size, end_offset) as usize, 0);
-                                    if let Err(error) = zlib.read_exact(&mut out_buffer) { // TODO: maybe not read_exact()?
+                                    if let Err(error) = zlib.read_exact(&mut out_buffer) {
                                         return reply.error(error.raw_os_error().unwrap_or(EIO));
                                     }
                                     out_buffer.drain(0..read_offset as usize);
@@ -465,7 +470,7 @@ impl Filesystem for U4PakFS {
                                     let remaining = end_offset - current_offset;
                                     let index = out_buffer.len();
                                     out_buffer.resize(index + remaining as usize, 0);
-                                    if let Err(error) = zlib.read_exact(&mut out_buffer[index..]) { // TODO: maybe not read_exact()?
+                                    if let Err(error) = zlib.read_exact(&mut out_buffer[index..]) {
                                         return reply.error(error.raw_os_error().unwrap_or(EIO));
                                     }
                                 } else if let Err(error) = zlib.read_to_end(&mut out_buffer) {

@@ -96,9 +96,18 @@ Offsets and sizes seem to be 64bit or at least unsigned 32bit integers. If
 interpreted as 32bit integers all sizes (except the size of file names) and offsets
 are followed by another 32bit integer of the value 0, which makes me guess these
 are 64bit values. Also some values exceed the range of signed 32bit integers, so
-they have to be at least unsigned 32bit integers. This information was reverse
-engineered from the Elemental [Demo](https://wiki.unrealengine.com/Linux_Demos)
-for Linux (which contains a 2.5 GB .pak file).
+they have to be at least unsigned 32bit integers.
+
+This information was reverse engineered from the Elemental
+[Demo](https://wiki.unrealengine.com/Linux_Demos) for Linux (which contains a 2.5
+GB .pak file), the [Unreal Engine 4 - Five Tech Demos](https://www.techpowerup.com/download/unreal-engine-4-five-tech-demos/),
+version 7 was reverse engineered from the [Supraland Demo](https://store.steampowered.com/app/813630/Supraland/),
+and the Conan Exiles variant was reverse egineered from the
+[SandstormFix_EXP workshop item](https://steamcommunity.com/sharedfiles/filedetails/?id=1765361591).
+Reverse engineering was done by poking around the pak files with a hex editor,
+no kind of decompilation was done by me. After I had started with the Python
+tool someone told me about some parts I got wrong, that they've reverse
+engineered themselves somehow before, though.
 
 Basic layout:
 
@@ -142,6 +151,9 @@ if version >= 3
      ?     1  uint8_t      is encrypted
    ?+1     4  uint32_t     The uncompressed size of each compression block.
 end                        The last block can be smaller, of course.
+if Conan Exiles
+     ?     4  uint32_t     Unknown field, only seen it to have the value 0.
+end
 ```
 
 ### Compression Block (CB)

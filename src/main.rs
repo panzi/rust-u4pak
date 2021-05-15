@@ -16,7 +16,7 @@
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use terminal_size::{terminal_size, Width};
 
-use pak::COMPR_NONE;
+use pak::{COMPR_NONE, Variant};
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
 use std::fs::File;
@@ -175,6 +175,15 @@ fn arg_verbose<'a, 'b>() -> Arg<'a, 'b> {
         .short("v")
         .takes_value(false)
         .help("Verbose output.")
+}
+
+fn arg_variant<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("variant")
+        .long("variant")
+        .short("a")
+        .takes_value(true)
+        .default_value("standard")
+        .help("Pak variant: 'standard' or 'conan_exiles'.")
 }
 
 fn arg_ignore_magic<'a, 'b>() -> Arg<'a, 'b> {
@@ -340,6 +349,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("info")
             .alias("i")
             .about("Show summarized information of a package")
+            .arg(arg_variant())
             .arg(arg_human_readable())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -348,6 +358,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("list")
             .alias("l")
             .about("List content of a package")
+            .arg(arg_variant())
             .arg(Arg::with_name("only-names")
                 .long("only-names")
                 .short("n")
@@ -393,6 +404,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("check")
             .alias("c")
             .about("Check consistency of a package")
+            .arg(arg_variant())
             .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -405,6 +417,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("unpack")
             .alias("u")
             .about("Unpack content of a package")
+            .arg(arg_variant())
             .arg(arg_print0())
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
@@ -430,14 +443,14 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("pack")
             .alias("p")
             .about("Create a new package")
+            .arg(arg_variant())
             .arg(Arg::with_name("version")
                 .long("version")
                 .short("V")
                 .takes_value(true)
-                .default_value("3")
                 .help(
                     "Create package of given VERSION. Supported versions are: 1, 2, 3, 4 and 7 \
-                    (though I'm not too sure about version 4 and 7)"))
+                    (though I'm not too sure about version 4 and 7) [default: 3 when --variant=standard, 4 when --variant=conan_exiles]"))
             .arg(Arg::with_name("mount-point")
                 .long("mount-point")
                 .short("m")
@@ -512,6 +525,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
     let app = app.subcommand(SubCommand::with_name("mount")
         .alias("m")
         .about("Mount package as read-only filesystem")
+        .arg(arg_variant())
         .arg(arg_ignore_magic())
         .arg(arg_encoding())
         .arg(arg_force_version())
@@ -590,6 +604,7 @@ fn main() {
 fn run(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         ("info", Some(args)) => {
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let human_readable = args.is_present("human-readable");
             let ignore_magic   = args.is_present("ignore-magic");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
@@ -602,6 +617,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             };
 
             let pak = Pak::from_path(&path, Options {
+                variant,
                 ignore_magic,
                 encoding,
                 force_version,
@@ -617,6 +633,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             };
             let order = order.as_ref().map(|order| &order[..]);
 
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let human_readable = args.is_present("human-readable");
             let null_separated = args.is_present("print0");
             let only_names     = args.is_present("only-names");
@@ -644,6 +661,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
+                variant,
                 ignore_magic,
                 encoding,
                 force_version,
@@ -666,6 +684,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let ignore_magic          = args.is_present("ignore-magic");
             let ignore_null_checksums = args.is_present("ignore-null-checksums");
             let verbose               = args.is_present("verbose");
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let paths = get_paths(args)?;
@@ -688,12 +707,14 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
+                variant,
                 ignore_magic,
                 encoding,
                 force_version,
             })?;
 
             let options = CheckOptions {
+                variant,
                 abort_on_error: true,
                 ignore_null_checksums,
                 null_separated,
@@ -713,6 +734,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             }
         }
         ("unpack", Some(args)) => {
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let outdir = args.value_of("outdir").unwrap();
             let null_separated           = args.is_present("print0");
             let verbose                  = args.is_present("verbose");
@@ -741,6 +763,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
+                variant,
                 ignore_magic,
                 encoding,
                 force_version,
@@ -757,12 +780,20 @@ fn run(matches: &ArgMatches) -> Result<()> {
             })?;
         }
         ("pack", Some(args)) => {
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let thread_count = get_threads(args)?;
             let null_separated = args.is_present("print0");
             let verbose        = args.is_present("verbose");
             let mount_point = args.value_of("mount-point");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
-            let version = args.value_of("version").unwrap().parse()?;
+            let version = if let Some(version) = args.value_of("version") {
+                version.parse()?
+            } else {
+                match variant {
+                    Variant::Standard => 3,
+                    Variant::ConanExiles => 4,
+                }
+            };
             let compression_block_size = parse_size(args.value_of("compression-block-size").unwrap())?;
             if compression_block_size > u32::MAX as usize {
                 return Err(Error::new(format!("--compression-block-size too big: {}", compression_block_size)));
@@ -788,6 +819,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             };
 
             pack(path, &paths, PackOptions {
+                variant,
                 version,
                 mount_point,
                 compression_method,
@@ -804,6 +836,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let foreground   = args.is_present("foreground");
             let debug        = args.is_present("debug");
             let ignore_magic = args.is_present("ignore-magic");
+            let variant = args.value_of("variant").unwrap().try_into()?;
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let mountpt = args.value_of("mountpt").unwrap();
@@ -821,6 +854,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let mut reader = BufReader::new(&mut file);
 
             let pak = Pak::from_reader(&mut reader, Options {
+                variant,
                 ignore_magic,
                 encoding,
                 force_version,

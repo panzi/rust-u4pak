@@ -19,7 +19,7 @@ use crossbeam_channel::{Sender, unbounded};
 use crossbeam_utils::thread;
 use openssl::sha::Sha1 as OpenSSLSha1;
 
-use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1}};
+use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1, Variant}};
 use crate::reopen::Reopen;
 use crate::{Record, Result};
 
@@ -27,6 +27,7 @@ pub const NULL_SHA1: Sha1 = [0u8; 20];
 
 #[derive(Debug)]
 pub struct CheckOptions<'a> {
+    pub variant: Variant,
     pub abort_on_error: bool,
     pub ignore_null_checksums: bool,
     pub null_separated: bool,
@@ -38,6 +39,7 @@ pub struct CheckOptions<'a> {
 impl Default for CheckOptions<'_> {
     fn default() -> Self {
         Self {
+            variant: Variant::default(),
             abort_on_error: false,
             ignore_null_checksums: false,
             null_separated: false,
@@ -112,7 +114,15 @@ where R: Read, R: Seek {
 
 
 pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Result<usize> {
-    let CheckOptions { abort_on_error, ignore_null_checksums, null_separated, verbose, thread_count, paths } = options;
+    let CheckOptions {
+        variant,
+        abort_on_error,
+        ignore_null_checksums,
+        null_separated,
+        verbose,
+        thread_count,
+        paths,
+    } = options;
     let mut error_count = 0usize;
     let pak_path = in_file.path()?;
     let index_offset = pak.index_offset();
@@ -129,12 +139,20 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
         }
     }
 
-    let read_record = match version {
-        1 => Record::read_v1,
-        2 => Record::read_v2,
-        _ if version <= 5 || version == 7 => Record::read_v3,
-        _ => {
-            return Err(Error::new(format!("unsupported version: {}", version)));
+    let read_record = match variant {
+        Variant::ConanExiles => {
+            if version != 4 {
+                return Err(Error::new(format!("Only know how to handle Conan Exile paks of version 4, but version was {}.", version)));
+            }
+            Record::read_conan_exiles
+        }
+        Variant::Standard => match version {
+            1 => Record::read_v1,
+            2 => Record::read_v2,
+            _ if version <= 5 || version == 7 => Record::read_v3,
+            _ => {
+                return Err(Error::new(format!("unsupported version: {}", version)));
+            }
         }
     };
 
@@ -169,7 +187,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                         )).with_path(record.filename()));
                     }
 
-                    let offset = record.offset() + Pak::header_size(version, record);
+                    let offset = record.offset() + Pak::header_size(version, variant, record);
                     if offset + record.size() > index_offset {
                         check_error!(ok, result_sender, abort_on_error, Error::new(
                             "data bleeds into index".to_string()

@@ -21,7 +21,7 @@ use crossbeam_utils::thread;
 use openssl::sha::Sha1 as OpenSSLSha1;
 use flate2::{Compression, write::ZlibEncoder};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
+use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -128,6 +128,7 @@ impl TryFrom<&str> for PackPath {
 
 #[derive(Debug)]
 pub struct PackOptions<'a> {
+    pub variant: Variant,
     pub version: u32,
     pub mount_point: Option<&'a str>,
     pub compression_method: u32,
@@ -142,6 +143,7 @@ pub struct PackOptions<'a> {
 impl Default for PackOptions<'_> {
     fn default() -> Self {
         Self {
+            variant: Variant::default(),
             version: 3,
             mount_point: None,
             compression_method: COMPR_NONE,
@@ -156,17 +158,28 @@ impl Default for PackOptions<'_> {
 }
 
 pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions) -> Result<Pak> {
-    let write_record_inline = match options.version {
-        1 => Record::write_v1_inline,
-        2 => Record::write_v2_inline,
-        3 => Record::write_v3_inline,
-        4 => Record::write_v3_inline, // maybe?
-        5 => Record::write_v3_inline, // maybe?
-        7 => Record::write_v3_inline, // maybe?
-        _ => {
-            return Err(Error::new(
-                format!("unsupported version: {}", options.version)).
-                with_path(pak_path));
+    let write_record_inline = match options.variant {
+        Variant::ConanExiles => {
+            if options.version != 4 {
+                return Err(Error::new(format!(
+                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                    options.version)).
+                    with_path(pak_path));
+            }
+            Record::write_conan_exiles_inline
+        }
+        Variant::Standard => match options.version {
+            1 => Record::write_v1_inline,
+            2 => Record::write_v2_inline,
+            3 => Record::write_v3_inline,
+            4 => Record::write_v3_inline, // maybe?
+            5 => Record::write_v3_inline, // maybe?
+            7 => Record::write_v3_inline, // maybe?
+            _ => {
+                return Err(Error::new(
+                    format!("unsupported version: {}", options.version)).
+                    with_path(pak_path));
+            }
         }
     };
 
@@ -370,17 +383,28 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     index_size += buffer.len() as u64;
 
-    let write_record = match options.version {
-        1 => Record::write_v1,
-        2 => Record::write_v2,
-        3 => Record::write_v3,
-        4 => Record::write_v3, // maybe?
-        5 => Record::write_v3, // maybe?
-        7 => Record::write_v3, // maybe?
-        _ => {
-            return Err(Error::new(
-                format!("unsupported version: {}", options.version)).
-                with_path(pak_path));
+    let write_record = match options.variant {
+        Variant::ConanExiles => {
+            if options.version != 4 {
+                return Err(Error::new(format!(
+                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                    options.version)).
+                    with_path(pak_path));
+            }
+            Record::write_conan_exiles
+        }
+        Variant::Standard => match options.version {
+            1 => Record::write_v1,
+            2 => Record::write_v2,
+            3 => Record::write_v3,
+            4 => Record::write_v3, // maybe?
+            5 => Record::write_v3, // maybe?
+            7 => Record::write_v3, // maybe?
+            _ => {
+                return Err(Error::new(
+                    format!("unsupported version: {}", options.version)).
+                    with_path(pak_path));
+            }
         }
     };
 
@@ -406,6 +430,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     writer.flush()?;
 
     Ok(Pak::new(
+        options.variant,
         options.version,
         index_offset,
         index_size,
@@ -483,15 +508,25 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
     let compression_level = Compression::new(options.compression_level.get());
 
-    let base_header_size = match options.version {
-        1 => V1_RECORD_HEADER_SIZE,
-        2 => V2_RECORD_HEADER_SIZE,
-        3 => V3_RECORD_HEADER_SIZE,
-        4 => V3_RECORD_HEADER_SIZE, // maybe?
-        5 => V3_RECORD_HEADER_SIZE, // maybe?
-        7 => V3_RECORD_HEADER_SIZE, // maybe?
-        _ => {
-            panic!("unsupported version: {}", options.version)
+    let base_header_size = match options.variant {
+        Variant::ConanExiles => {
+            if options.version != 4 {
+                return Err(Error::new(format!(
+                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                    options.version)));
+            }
+            CONAN_EXILE_RECORD_HEADER_SIZE
+        }
+        Variant::Standard => match options.version {
+            1 => V1_RECORD_HEADER_SIZE,
+            2 => V2_RECORD_HEADER_SIZE,
+            3 => V3_RECORD_HEADER_SIZE,
+            4 => V3_RECORD_HEADER_SIZE, // maybe?
+            5 => V3_RECORD_HEADER_SIZE, // maybe?
+            7 => V3_RECORD_HEADER_SIZE, // maybe?
+            _ => {
+                panic!("unsupported version: {}", options.version)
+            }
         }
     };
     let mut header_buffer = vec![0u8; base_header_size as usize];

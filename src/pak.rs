@@ -36,6 +36,7 @@ pub const COMPR_BIAS_SPEED : u32 = 0x20;
 pub const V1_RECORD_HEADER_SIZE: u64 = 56;
 pub const V2_RECORD_HEADER_SIZE: u64 = 48;
 pub const V3_RECORD_HEADER_SIZE: u64 = 53;
+pub const CONAN_EXILE_RECORD_HEADER_SIZE: u64 = 57;
 pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
 
 pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
@@ -71,6 +72,33 @@ impl<'a> Display for HexDisplay<'a> {
             write!(f, "{:02x}", byte)?;
         }
         Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Variant {
+    Standard,
+    ConanExiles,
+}
+
+impl Default for Variant {
+    fn default() -> Self {
+        Variant::Standard
+    }
+}
+
+impl TryFrom<&str> for Variant {
+    type Error = crate::result::Error;
+
+    fn try_from(variant: &str) -> std::result::Result<Self, Error> {
+        let trimmed_variant = variant.trim();
+        if trimmed_variant.eq_ignore_ascii_case("standard") {
+            Ok(Variant::Standard)
+        } else if trimmed_variant.eq_ignore_ascii_case("conan_exiles") || trimmed_variant.eq_ignore_ascii_case("conanexiles") || trimmed_variant.eq_ignore_ascii_case("conan exiles") {
+            Ok(Variant::ConanExiles)
+        } else {
+            Err(Error::new(format!("illegal variant: {:?}", variant)))
+        }
     }
 }
 
@@ -124,6 +152,7 @@ impl TryFrom<&str> for Encoding {
 
 #[derive(Debug)]
 pub struct Pak {
+    variant: Variant,
     version: u32,
     index_offset: u64,
     index_size: u64,
@@ -134,6 +163,7 @@ pub struct Pak {
 
 #[derive(Debug)]
 pub struct Options {
+    pub variant: Variant,
     pub ignore_magic: bool,
     pub encoding: Encoding,
     pub force_version: Option<u32>,
@@ -142,6 +172,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            variant: Variant::default(),
             ignore_magic: false,
             encoding: Encoding::UTF8,
             force_version: None,
@@ -166,6 +197,7 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
 impl Pak {
     #[inline]
     pub(crate) fn new(
+        variant: Variant,
         version: u32,
         index_offset: u64,
         index_size: u64,
@@ -174,6 +206,7 @@ impl Pak {
         records: Vec<Record>,
     ) -> Self {
         Self {
+            variant,
             version,
             index_offset,
             index_size,
@@ -220,12 +253,21 @@ impl Pak {
             return Err(Error::new(format!("illegal file magic: 0x{:X}", magic)));
         }
 
-        let read_record = match version {
-            1 => Record::read_v1,
-            2 => Record::read_v2,
-            _ if version <= 5 || version == 7 => Record::read_v3,
-            _ => {
-                return Err(Error::new(format!("unsupported version: {}", version)));
+        let variant = options.variant;
+        let read_record = match variant {
+            Variant::ConanExiles => {
+                if version != 4 {
+                    return Err(Error::new(format!("Only know how to handle Conan Exile paks of version 4, but version was {}.", version)));
+                }
+                Record::read_conan_exiles
+            }
+            Variant::Standard => match version {
+                1 => Record::read_v1,
+                2 => Record::read_v2,
+                _ if version <= 5 || version == 7 => Record::read_v3,
+                _ => {
+                    return Err(Error::new(format!("unsupported version: {}", version)));
+                }
             }
         };
 
@@ -254,6 +296,7 @@ impl Pak {
         }
 
         Ok(Self {
+            variant,
             version,
             index_offset,
             index_size,
@@ -261,6 +304,11 @@ impl Pak {
             mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
             records,
         })
+    }
+
+    #[inline]
+    pub fn variant(&self) -> Variant {
+        self.variant
     }
 
     #[inline]
@@ -306,19 +354,27 @@ impl Pak {
     //    filter.filter(self.records.iter())
     //}
 
-    pub fn header_size(version: u32, record: &Record) -> u64 {
-        match version {
-            1 => V1_RECORD_HEADER_SIZE,
-            2 => V2_RECORD_HEADER_SIZE,
-            _ if version <= 5 || version == 7 => {
-                let mut size: u64 = V3_RECORD_HEADER_SIZE;
-                if let Some(blocks) = &record.compression_blocks() {
-                    size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
+    pub fn header_size(version: u32, variant: Variant, record: &Record) -> u64 {
+        match variant {
+            Variant::ConanExiles => {
+                if version != 4 {
+                    panic!("unsupported Conan Exile pak version: {}", version)
                 }
-                size
+                CONAN_EXILE_RECORD_HEADER_SIZE
             }
-            _ => {
-                panic!("unsupported version: {}", version)
+            Variant::Standard => match version {
+                1 => V1_RECORD_HEADER_SIZE,
+                2 => V2_RECORD_HEADER_SIZE,
+                _ if version <= 5 || version == 7 => {
+                    let mut size: u64 = V3_RECORD_HEADER_SIZE;
+                    if let Some(blocks) = &record.compression_blocks() {
+                        size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
+                    }
+                    size
+                }
+                _ => {
+                    panic!("unsupported version: {}", version)
+                }
             }
         }
     }

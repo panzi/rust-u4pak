@@ -20,7 +20,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
 
-use crate::{Error, Result, io::transfer, pak::{self, COMPR_NONE, compression_method_name}, util::parse_pak_path};
+use crate::{Error, Result, io::transfer, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
 use crate::Record;
 use crate::Pak;
 use crate::Filter;
@@ -50,6 +50,7 @@ impl Default for UnpackOptions<'_> {
 #[inline]
 fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a UnpackOptions<'a>, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
     let version = pak.version();
+    let variant = pak.variant();
 
     let dirnames = if options.dirname_from_compression {
         let mut zlib_outdir = outdir.to_path_buf();
@@ -76,7 +77,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 
             scope.spawn(move |_| {
                 let in_file = &mut in_file;
-                if let Err(error) = worker_proc(in_file, version, work_receiver, result_sender) {
+                if let Err(error) = worker_proc(in_file, version, variant, work_receiver, result_sender) {
                     if !error.error_type().is_channel_disconnected() {
                         eprintln!("error in worker thread: {}", error);
                     }
@@ -161,7 +162,7 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, optio
     Ok(())
 }
 
-pub fn unpack_record(record: &Record, version: u32, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<PathBuf> {
+pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<PathBuf> {
     if record.encrypted() {
         return Err(Error::new("encryption is not supported".to_string())
             .with_path(record.filename()));
@@ -194,7 +195,7 @@ pub fn unpack_record(record: &Record, version: u32, in_file: &mut File, outdir: 
 
     match record.compression_method() {
         pak::COMPR_NONE => {
-            in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, record)))?;
+            in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, variant, record)))?;
             transfer(in_file, &mut out_file, record.size() as usize)?;
             out_file.flush()?;
         }
@@ -222,7 +223,7 @@ pub fn unpack_record(record: &Record, version: u32, in_file: &mut File, outdir: 
                 out_file.flush()?;
             } else {
                 // version 2 has compression support, but not compression blocks
-                in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, record)))?;
+                in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, variant, record)))?;
 
                 let mut in_buffer = vec![0u8; record.size() as usize];
                 let mut out_buffer = Vec::new();
@@ -251,9 +252,9 @@ struct Work<'a> {
     outdir: &'a Path,
 }
 
-fn worker_proc(in_file: &mut File, version: u32, work_channel: Receiver<Work>, result_channel: Sender<Result<PathBuf>>) -> Result<()> {
+fn worker_proc(in_file: &mut File, version: u32, variant: Variant, work_channel: Receiver<Work>, result_channel: Sender<Result<PathBuf>>) -> Result<()> {
     while let Ok(Work { record, outdir }) = work_channel.recv() {
-        let result = unpack_record(record, version, in_file, outdir)
+        let result = unpack_record(record, version, variant, in_file, outdir)
             .map_err(|error| error
                 .with_path_if_none(record.filename()));
 

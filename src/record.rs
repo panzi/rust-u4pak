@@ -217,6 +217,28 @@ impl Record {
         Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
     }
 
+    pub fn read_conan_exiles(reader: &mut impl Read, filename: String) -> Result<Record> {
+        decode!(reader,
+            offset: u64,
+            size: u64,
+            uncompressed_size: u64,
+            compression_method: u32,
+            sha1: Sha1,
+            if compression_method != COMPR_NONE {
+                compression_blocks: CompressionBlock [u32],
+            }
+            encrypted: u8,
+            compression_block_size: u32,
+            unknown: u32,
+        );
+
+        if unknown != 0 {
+            eprintln!("{}: WARNING: unknown field has other value than 0: {}", filename, unknown);
+        }
+
+        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+    }
+
     pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {
         encode!(writer,
             self.offset,
@@ -291,6 +313,40 @@ impl Record {
             }
             self.encrypted as u8,
             self.compression_block_size,
+        );
+        Ok(())
+    }
+
+    pub fn write_conan_exiles(&self, writer: &mut impl Write) -> Result<()> {
+        encode!(writer,
+            self.offset,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+            if let Some(blocks) = &self.compression_blocks {
+                blocks [u32],
+            }
+            self.encrypted as u8,
+            self.compression_block_size,
+            0u32,
+        );
+        Ok(())
+    }
+
+    pub fn write_conan_exiles_inline(&self, writer: &mut impl Write) -> Result<()> {
+        encode!(writer,
+            0u64,
+            self.size,
+            self.uncompressed_size,
+            self.compression_method,
+            self.sha1,
+            if let Some(blocks) = &self.compression_blocks {
+                blocks [u32],
+            }
+            self.encrypted as u8,
+            self.compression_block_size,
+            0u32,
         );
         Ok(())
     }
