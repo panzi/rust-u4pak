@@ -273,7 +273,7 @@ impl Pak {
 
         if index_offset + index_size > footer_offset {
             return Err(Error::new(format!(
-                "illegal index offset/size: index_offset ({}) + index_size ({}) > footer_size ({})",
+                "illegal index offset/size: index_offset ({}) + index_size ({}) > footer_offset ({})",
                 index_offset, index_size, footer_offset)));
         }
 
