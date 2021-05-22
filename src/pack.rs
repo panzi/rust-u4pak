@@ -160,13 +160,18 @@ impl Default for PackOptions<'_> {
 pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions) -> Result<Pak> {
     let write_record_inline = match options.variant {
         Variant::ConanExiles => {
-            if options.version != 4 {
-                return Err(Error::new(format!(
-                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
-                    options.version)).
-                    with_path(pak_path));
-            }
-            Record::write_conan_exiles_inline
+            return Err(Error::new("Writing of Conan Exile paks is not supported.".to_string()).
+                with_path(pak_path));
+            // XXX: There a are 20 unknown bytes after the inline record information if compressed.
+            //      That is 16 extra to the already 4 extra bytes in standard version >= 4.
+            //      In the index record there are only 4 extra bytes that are always 0.
+            //if options.version != 4 {
+            //    return Err(Error::new(format!(
+            //        "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+            //        options.version)).
+            //        with_path(pak_path));
+            //}
+            //Record::write_conan_exiles_inline
         }
         Variant::Standard => match options.version {
             1 => Record::write_v1_inline,

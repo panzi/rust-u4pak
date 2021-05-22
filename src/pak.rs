@@ -354,6 +354,7 @@ impl Pak {
     //    filter.filter(self.records.iter())
     //}
 
+    // FIXME: inline header has different size in some versions/variants!
     pub fn header_size(version: u32, variant: Variant, record: &Record) -> u64 {
         match variant {
             Variant::ConanExiles => {

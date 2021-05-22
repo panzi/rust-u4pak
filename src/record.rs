@@ -16,7 +16,7 @@
 use std::io::{Read, Write};
 use std::fmt::Write as FmtWrite;
 
-use crate::pak::{COMPR_NONE, HexDisplay, Sha1};
+use crate::{check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
@@ -346,7 +346,8 @@ impl Record {
             }
             self.encrypted as u8,
             self.compression_block_size,
-            0u32,
+            // there are suppodes to be 20 more bytes of something that I don't know:
+            NULL_SHA1,
         );
         Ok(())
     }

@@ -22,6 +22,7 @@ use openssl::sha::Sha1 as OpenSSLSha1;
 use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1, Variant}};
 use crate::reopen::Reopen;
 use crate::{Record, Result};
+//use crate::{decode, decode::Decode};
 
 pub const NULL_SHA1: Sha1 = [0u8; 20];
 
@@ -218,6 +219,14 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                                 check_error!(ok, result_sender, abort_on_error, error);
                             }
                         };
+                        //if version >= 4 {
+                        //    let mut f = || -> Result<()> {
+                        //        decode!(&mut reader, unknown: u32);
+                        //        println!(">>> {:20} {:15x} {}", unknown, unknown, record.filename());
+                        //        Ok(())
+                        //    };
+                        //    let _ = f();
+                        //}
                     }
 
                     if let Some(blocks) = record.compression_blocks() {
@@ -228,8 +237,12 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                             let base_offset;
                             let mut next_start_offset;
 
-                            // + 4 for unknown extra field in inline record
-                            if version >= 7 {
+                            if variant == Variant::ConanExiles {
+                                // only version 4 is correctly supported
+                                base_offset = 0;
+                                next_start_offset = record.offset() + header_size + 20;
+                            } else if version >= 7 {
+                                // + 4 for unknown extra field in inline record
                                 base_offset = record.offset();
                                 next_start_offset = header_size + 4;
                             } else if version >= 4 {

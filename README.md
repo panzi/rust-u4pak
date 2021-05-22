@@ -145,26 +145,18 @@ if version <= 1
 end
      ?    20  uint8_t[20]  data sha1 hash
 if version >= 3
- if compression method != 0x00
+ if compression_method != 0x00
   ?+20     4  uint32_t     block count (M)
   ?+24  M*16  CB[M]        compression blocks
  end
      ?     1  uint8_t      is encrypted
    ?+1     4  uint32_t     The uncompressed size of each compression block.
 end                        The last block can be smaller, of course.
-if variant == "Conan Exiles" or (version >= 4 and is data record)
-     ?     4  uint32_t     Unknown field. For Conan Exiles only seen it to have
-                           the value 0.
+if variant == "Conan Exiles"
+     ?     4  uint32_t     Unknown field. For Conan Exiles index record only
+                           seen it to have the value 0.
 end
 ```
-
-**NOTE:** Starting with version 4 there is an additional 4 bytes in the repeated
-*inline* record copy (the record that precedes the actual file date, not the
-record in the index). I don't know what that is. It is not always the same value.
-E.g. it is the same for some files, but different for others. The last 2 bytes
-are more often the same than the whole 4 bytes.
-
-This is why I've deactivated packing for versions > 3.
 
 ### Compression Block (CB)
 
@@ -188,8 +180,24 @@ Offset  Size  Type         Description
 ```plain
 Offset  Size  Type            Description
      0     ?  Record          file metadata (offset field is 0, N = compressed_size)
+if variant == "Conan Exiles"
+     ?    20  ?               Unknown. Maybe another SHA-1 sum of something?
+                              The first 4 bytes have values other than the extra
+                              4 bytes in the index record, which is why I didn't
+                              put those into the general record structure.
+else if version >= 4
+     ?     4  uint32_t        Unknown.
+end
      ?     N  uint8_t[N]      file data
 ```
+
+**NOTE:** Starting with version 4 there is an additional 4 bytes in the repeated
+*data* record copy (the record that precedes the actual file date, not the
+record in the index). I don't know what that is. It is not always the same value.
+E.g. it is the same for some files, but different for others. The last 2 bytes
+are more often the same than the whole 4 bytes.
+
+This is why I've deactivated packing for versions > 3.
 
 ### Index Record
 
@@ -198,6 +206,9 @@ Offset  Size  Type            Description
      0     4  uint32_t        file name size (S)
      4     S  char[S]         file name (includes terminating null byte)
    4+S     ?  Record          file metadata
+if variant == "Conan Exiles"
+     ?     4  ?               Unknown. Only saw all 0 so far.
+end
 ```
 
 ### Index
