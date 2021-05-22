@@ -406,7 +406,6 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .about("Check consistency of a package")
             .arg(Arg::with_name("abort-on-error")
                 .long("abort-on-error")
-                .short("e")
                 .takes_value(false)
                 .help("Stop on the first found error."))
             .arg(arg_variant())
