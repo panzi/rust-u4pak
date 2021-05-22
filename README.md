@@ -159,7 +159,7 @@ end
 ```
 
 **NOTE:** Starting with version 4 there is an additional 4 bytes in the repeated
-*inline* record copy (the record that preceeds the actual file date, not the
+*inline* record copy (the record that precedes the actual file date, not the
 record in the index). I don't know what that is. It is not always the same value.
 E.g. it is the same for some files, but different for others. The last 2 bytes
 are more often the same than the whole 4 bytes.
