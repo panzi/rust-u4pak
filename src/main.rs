@@ -290,7 +290,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .about("\n\
                 This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \
                 Note that only a limited number of pak versions are supported, depending on the kinds of \
-                paks I have seen (version 1, 2, 3, 4, 7).\n\
+                paks I have seen.For reading that is version 1, 2, 3, 4, 7, for writing it is 1, 2, 3.\n\
                 \n\
                 Encryption is not supported. I haven't seen a pak file that uses encryption and I have \
                 no clue how it would work (e.g. what is the algorithm or where to get the encrytion key \
@@ -333,7 +333,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 \n\
                 Homepage: https://github.com/panzi/rust-u4pak\n\
                 Report issues to: https://github.com/panzi/rust-u4pak/issues")
-        .version("1.1.0")
+        .version("1.2.0")
         .global_setting(AppSettings::VersionlessSubcommands)
         .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
 
@@ -404,6 +404,11 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .subcommand(SubCommand::with_name("check")
             .alias("c")
             .about("Check consistency of a package")
+            .arg(Arg::with_name("abort-on-error")
+                .long("abort-on-error")
+                .short("e")
+                .takes_value(false)
+                .help("Stop on the first found error."))
             .arg(arg_variant())
             .arg(arg_print0())
             .arg(arg_ignore_magic())
@@ -449,8 +454,8 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .short("V")
                 .takes_value(true)
                 .help(
-                    "Create package of given VERSION. Supported versions are: 1, 2, 3, 4 and 7 \
-                    (though I'm not too sure about version 4 and 7) [default: 3 when --variant=standard, 4 when --variant=conan_exiles]"))
+                    "Create package of given VERSION. Supported versions are: 1, 2, and 3 \
+                    [default: 3 when --variant=standard, 4 when --variant=conan_exiles]"))
             .arg(Arg::with_name("mount-point")
                 .long("mount-point")
                 .short("m")
@@ -683,6 +688,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let null_separated        = args.is_present("print0");
             let ignore_magic          = args.is_present("ignore-magic");
             let ignore_null_checksums = args.is_present("ignore-null-checksums");
+            let abort_on_error        = args.is_present("abort-on-error");
             let verbose               = args.is_present("verbose");
             let variant = args.value_of("variant").unwrap().try_into()?;
             let encoding = args.value_of("encoding").unwrap().try_into()?;
@@ -715,7 +721,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let options = CheckOptions {
                 variant,
-                abort_on_error: true,
+                abort_on_error,
                 ignore_null_checksums,
                 null_separated,
                 verbose,

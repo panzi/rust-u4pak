@@ -7,7 +7,8 @@ for fun, ease of use (standalone binary), and speed (multi-threading).
 This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4
 packages. Under Linux it can also be used to read-only FUSE-mount archives. Note
 that only a limited number of pak versions are supported, depending on the kinds
-of paks I have seen (version 1, 2, 3, 4, 7).
+of paks I have seen. For reading that is version 1, 2, 3, 4, 7, for writing it is
+1, 2, 3.
 
 Encryption is not supported. I haven't seen a pak file that uses encryption and
 I have no clue how it would work (e.g. what is the algorithm or where to get the
@@ -151,10 +152,19 @@ if version >= 3
      ?     1  uint8_t      is encrypted
    ?+1     4  uint32_t     The uncompressed size of each compression block.
 end                        The last block can be smaller, of course.
-if Conan Exiles
-     ?     4  uint32_t     Unknown field, only seen it to have the value 0.
+if variant == "Conan Exiles" or (version >= 4 and is data record)
+     ?     4  uint32_t     Unknown field. For Conan Exiles only seen it to have
+                           the value 0.
 end
 ```
+
+**NOTE:** Starting with version 4 there is an additional 4 bytes in the repeated
+*inline* record copy (the record that preceeds the actual file date, not the
+record in the index). I don't know what that is. It is not always the same value.
+E.g. it is the same for some files, but different for others. The last 2 bytes
+are more often the same than the whole 4 bytes.
+
+This is why I've deactivated packing for versions > 3.
 
 ### Compression Block (CB)
 

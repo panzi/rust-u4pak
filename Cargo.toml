@@ -1,6 +1,6 @@
 [package]
 name = "u4pak"
-version = "0.1.0"
+version = "1.2.0"
 authors = ["Mathias Panzenböck <grosser.meister.morti@gmx.net>"]
 edition = "2018"
 license-file = "LICENSE.txt"

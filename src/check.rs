@@ -158,7 +158,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
 
     let thread_result = thread::scope::<_, Result<usize>>(|scope| {
         let (work_sender, work_receiver) = unbounded::<&Record>();
-        let (result_sender, result_receiver) = unbounded::<Result<&str>>();
+        let (result_sender, result_receiver) = unbounded::<Result<&Record>>();
 
         for _ in 0..thread_count.get() {
             let work_receiver = work_receiver.clone();
@@ -222,17 +222,42 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
 
                     if let Some(blocks) = record.compression_blocks() {
                         if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
-                            let base_offset = if version >= 7 { record.offset() } else { 0 };
+                            let header_size = Pak::header_size(version, variant, record);
                             let mut hasher = OpenSSLSha1::new();
 
-                            for block in blocks {
+                            let base_offset;
+                            let mut next_start_offset;
+
+                            // + 4 for unknown extra field in inline record
+                            if version >= 7 {
+                                base_offset = record.offset();
+                                next_start_offset = header_size + 4;
+                            } else if version >= 4 {
+                                base_offset = 0;
+                                next_start_offset = record.offset() + header_size + 4;
+                            } else {
+                                base_offset = 0;
+                                next_start_offset = record.offset() + header_size;
+                            }
+
+                            let end_offset = next_start_offset + record.size();
+
+                            for (index, block) in blocks.iter().enumerate() {
                                 if block.start_offset > block.end_offset {
                                     check_error!(ok, result_sender, abort_on_error,
                                         Error::new(format!(
                                             "compression block start offset is bigger than end offset: {} > {}",
                                             block.start_offset, block.end_offset,
-                                        )));
+                                        )).with_path(record.filename()));
                                 } else {
+                                    if next_start_offset != block.start_offset {
+                                        check_error!(ok, result_sender, abort_on_error,
+                                            Error::new(format!(
+                                                "compression block with index {} start offset differes from expected value: {} != {} ({})",
+                                                index, block.start_offset, next_start_offset, block.start_offset as i64 - next_start_offset as i64,
+                                            )).with_path(record.filename()));
+                                    }
+
                                     let block_size = block.end_offset - block.start_offset;
 
                                     buffer.resize(block_size as usize, 0);
@@ -244,7 +269,17 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                                         return;
                                     }
                                     hasher.update(&buffer);
+
+                                    next_start_offset += block_size;
                                 }
+                            }
+
+                            if next_start_offset != end_offset {
+                                check_error!(ok, result_sender, abort_on_error,
+                                    Error::new(format!(
+                                        "actual record end offset differes from expected value: {} != {} ({})",
+                                        next_start_offset, end_offset, next_start_offset as i64 - end_offset as i64,
+                                    )).with_path(record.filename()));
                             }
 
                             let actual_digest = hasher.finish();
@@ -264,7 +299,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                     }
 
                     if ok {
-                        let _ = result_sender.send(Ok(record.filename()));
+                        let _ = result_sender.send(Ok(record));
                     }
                 }
             });
@@ -287,12 +322,13 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
 
         while let Ok(result) = result_receiver.recv() {
             match result {
-                Ok(filename) => {
+                Ok(record) => {
                     if verbose {
-                        print!("{}: OK{}", filename, linesep);
+                        print!("{}: OK{}", record.filename(), linesep);
                     }
                 }
                 Err(error) => {
+                    error_count += 1;
                     if abort_on_error {
                         return Err(error);
                     }
@@ -347,11 +383,7 @@ fn enqueue<'a>(records: impl std::iter::Iterator<Item=&'a Record>, work_sender: 
             }
         }
 
-        match work_sender.send(record) {
-            Ok(()) => {}
-            Err(error) =>
-                return Err(Error::new(error.to_string()).with_path(record.filename()))
-        }
+        let _ = work_sender.send(record);
     }
     Ok(error_count)
 }

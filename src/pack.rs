@@ -172,9 +172,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             1 => Record::write_v1_inline,
             2 => Record::write_v2_inline,
             3 => Record::write_v3_inline,
-            4 => Record::write_v3_inline, // maybe?
-            5 => Record::write_v3_inline, // maybe?
-            7 => Record::write_v3_inline, // maybe?
+            // XXX: There is an unknown 32bit field after the inline(!) record information if compressed.
+            // 4 => Record::write_v3_inline, // maybe?
+            // 5 => Record::write_v3_inline, // maybe?
+            // 7 => Record::write_v3_inline, // maybe?
             _ => {
                 return Err(Error::new(
                     format!("unsupported version: {}", options.version)).
@@ -397,9 +398,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             1 => Record::write_v1,
             2 => Record::write_v2,
             3 => Record::write_v3,
-            4 => Record::write_v3, // maybe?
-            5 => Record::write_v3, // maybe?
-            7 => Record::write_v3, // maybe?
+            // XXX: There is an unknown 32bit field after the inline(!) record information if compressed.
+            // 4 => Record::write_v3, // maybe?
+            // 5 => Record::write_v3, // maybe?
+            // 7 => Record::write_v3, // maybe?
             _ => {
                 return Err(Error::new(
                     format!("unsupported version: {}", options.version)).
