@@ -195,7 +195,8 @@ end
 *data* record copy (the record that precedes the actual file date, not the
 record in the index). I don't know what that is. It is not always the same value.
 E.g. it is the same for some files, but different for others. The first 2 bytes
-are more often the same than the whole 4 bytes.
+seem to be always the same (`0x78 0x9c` in a v4 and a v7 pak that I saw), so maybe
+its 2 16 bit fields?
 
 This is why I've deactivated packing for versions > 3.
 
