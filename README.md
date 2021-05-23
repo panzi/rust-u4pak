@@ -185,7 +185,7 @@ if variant == "Conan Exiles"
                               The first 4 bytes have values other than the extra
                               4 bytes in the index record, which is why I didn't
                               put those into the general record structure.
-else if version >= 4
+else if version >= 4 and compression_method != 0x00
      ?     4  uint32_t        Unknown.
 end
      ?     N  uint8_t[N]      file data
