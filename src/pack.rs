@@ -282,7 +282,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                 pak_filename.extend(file_path
                     .components()
                     .skip(component_count)
-                    .map(|comp| comp.as_os_str().to_string_lossy().to_string()));
+                    .map(|comp| comp.as_os_str().to_string_lossy().into_owned()));
 
                 let filename = make_pak_path(pak_filename.iter());
 
