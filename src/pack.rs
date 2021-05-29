@@ -277,12 +277,12 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             };
 
             let mut make_filename = |file_path: &Path| -> Result<String> {
-                let mut pak_filename: Vec<String> = file_path.components()
-                    .skip(component_count)
-                    .map(|comp| comp.as_os_str().to_string_lossy().to_string())
-                    .collect();
+                let mut pak_filename: Vec<String> = filename.iter().map(|comp| comp.to_string()).collect();
 
-                pak_filename.extend(filename.iter().map(|comp| comp.to_string()));
+                pak_filename.extend(file_path
+                    .components()
+                    .skip(component_count)
+                    .map(|comp| comp.as_os_str().to_string_lossy().to_string()));
 
                 let filename = make_pak_path(pak_filename.iter());
 
