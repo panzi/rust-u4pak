@@ -204,7 +204,9 @@ This is why I've deactivated packing for versions > 3.
 
 ```plain
 Offset  Size  Type            Description
-     0     4  uint32_t        file name size (S)
+     0     4  int32_t         file name size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
      4     S  char[S]         file name (includes terminating null byte)
    4+S     ?  Record          file metadata
 if variant == "Conan Exiles"
@@ -216,7 +218,9 @@ end
 
 ```plain
 Offset  Size  Type            Description
-     0     4  uint32_t        mount point size (S)
+     0     4  int32_t         mount point size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
      4     S  char[S]         mount point (includes terminating null byte)
    S+4     4  uint32_t        record count (N)
    S+8     ?  IndexRecord[N]  records

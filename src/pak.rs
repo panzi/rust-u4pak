@@ -183,7 +183,27 @@ impl Default for Options {
 pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
-    let size = u32::from_le_bytes(buf);
+    let size = i32::from_le_bytes(buf);
+
+    if size < 0 {
+        let utf16_size = -(size as isize) as usize;
+        let mut buf = vec![0u8; 2 * utf16_size];
+        reader.read_exact(&mut buf)?;
+
+        let mut utf16 = Vec::with_capacity(utf16_size);
+        let mut index = 0usize;
+        while index < buf.len() {
+            let bytes = [buf[index], buf[index + 1]];
+            utf16.push(u16::from_le_bytes(bytes));
+            index += 2;
+        }
+
+        if let Some(index) = utf16.iter().position(|&ch| ch == 0) {
+            utf16.truncate(index);
+        }
+
+        return Ok(String::from_utf16(&utf16)?);
+    }
 
     let mut buf = vec![0u8; size as usize];
     reader.read_exact(&mut buf)?;

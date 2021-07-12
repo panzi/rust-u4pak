@@ -169,6 +169,12 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
+impl From<std::string::FromUtf16Error> for Error {
+    fn from(error: std::string::FromUtf16Error) -> Self {
+        Error::new(format!("UTF-16 conversion error: {}", error))
+    }
+}
+
 impl From<clap::Error> for Error {
     fn from(error: clap::Error) -> Self {
         Error::new(error.message)
