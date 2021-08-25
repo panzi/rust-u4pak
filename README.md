@@ -47,6 +47,8 @@ pack
 --version=4
 --mount-point=../../..
 
+"C:\Users\Alice\My Documents\U4Project\NewArchive.pak"
+
 ":rename=/:C:\Users\Alice\My Documents\U4Project\Some Files"
 ":zlib,rename=/:Some Other Files"
 ```
