@@ -33,13 +33,13 @@ users that aren't used to a terminal. You can even associate the extension with
 u4pak.exe so that it will be automatically opened with it when you double click
 it. File paths in a .u4pak file are relative to the directory containing the
 file. The syntax of these files is not shell syntax. If you don't have any white
-space, double quotes (`"`), or hash marks (`#`) in your file names you don't have to
-worry about anything. `#` is used to start a comment line (only if it doesn't
+space, double quotes (`"`), or hash marks (`#`) in your file names you don't have
+to worry about anything. `#` is used to start a comment line (only if it doesn't
 touch any non-white space on it's left) and `"` is used to quote arguments
-containing white space, `#`, or `"`. In order to write a `"` in a quoted argument you
-simply need to double it, meaning an argument that contains nothing but a single
-`"` is written as `""""`. Newlines are ignored like any other white space. An
-example .u4pak file whould be:
+containing white space, `#`, or `"`. In order to write a `"` in a quoted argument
+you simply need to double it, meaning an argument that contains nothing but a
+single `"` is written as `""""`. Newlines are ignored like any other white space.
+An example .u4pak file whould be:
 
 ```sh
 # This is packing my project:
