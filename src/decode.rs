@@ -21,6 +21,15 @@ pub trait Decode: Sized {
     fn decode(reader: &mut impl Read) -> Result<Self>;
 }
 
+impl Decode for bool {
+    #[inline]
+    fn decode(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 1];
+        reader.read_exact(&mut buffer)?;
+        Ok(buffer[0] != 0u8)
+    }
+}
+
 impl Decode for u8 {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
@@ -38,11 +47,19 @@ impl Decode for u32 {
     }
 }
 
-
 impl Decode for u64 {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
         let mut buffer = [0u8; 8];
+        reader.read_exact(&mut buffer)?;
+        Ok(Self::from_le_bytes(buffer))
+    }
+}
+
+impl Decode for u128 {
+    #[inline]
+    fn decode(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 16];
         reader.read_exact(&mut buffer)?;
         Ok(Self::from_le_bytes(buffer))
     }
@@ -61,7 +78,7 @@ impl Decode for CompressionBlock {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
         let start_offset = u64::decode(reader)?;
-        let end_offset   = u64::decode(reader)?;
+        let end_offset = u64::decode(reader)?;
 
         Ok(Self {
             start_offset,

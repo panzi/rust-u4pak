@@ -27,6 +27,9 @@ use std::convert::TryFrom;
 pub mod pak;
 pub use pak::{Pak, Options, COMPR_ZLIB};
 
+pub mod decrypt;
+pub mod index;
+
 pub mod result;
 pub use result::{Error, Result};
 
@@ -242,6 +245,15 @@ fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
             file name separators.")
 }
 
+fn arg_encryption_key<'a, 'b>() -> Arg<'a, 'b> {
+    Arg::with_name("encryption-key")
+        .long("encryption-key")
+        .short("k")
+        .takes_value(true)
+        .value_name("ENCRYPTION_KEY")
+        .help("Base64 encoded 16 byte AES encryption key")
+}
+
 #[cfg(target_family="windows")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Pause {
@@ -354,7 +366,8 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
-            .arg(arg_package()))
+            .arg(arg_package())
+            .arg(arg_encryption_key()))
         .subcommand(SubCommand::with_name("list")
             .alias("l")
             .about("List content of a package")
@@ -400,7 +413,8 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_human_readable())
             .arg(arg_threads())
             .arg(arg_package())
-            .arg(arg_paths()))
+            .arg(arg_paths())
+            .arg(arg_encryption_key()))
         .subcommand(SubCommand::with_name("check")
             .alias("c")
             .about("Check consistency of a package")
@@ -417,7 +431,8 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_threads())
             .arg(arg_verbose())
             .arg(arg_package())
-            .arg(arg_paths()))
+            .arg(arg_paths())
+            .arg(arg_encryption_key()))
         .subcommand(SubCommand::with_name("unpack")
             .alias("u")
             .about("Unpack content of a package")
@@ -443,7 +458,8 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .default_value(".")
                 .help("Write unpacked files to DIR."))
             .arg(arg_package())
-            .arg(arg_paths()))
+            .arg(arg_paths())
+            .arg(arg_encryption_key()))
         .subcommand(SubCommand::with_name("pack")
             .alias("p")
             .about("Create a new package")
@@ -620,11 +636,21 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
+            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
+                Some(
+                    key.parse::<String>()
+                        .expect("Failed to parse encryption key."),
+                )
+            } else {
+                None
+            };
+
             let pak = Pak::from_path(&path, Options {
                 variant,
                 ignore_magic,
                 encoding,
                 force_version,
+                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
             })?;
 
             info(&pak, human_readable)?;
@@ -658,6 +684,15 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
+            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
+                Some(
+                    key.parse::<String>()
+                        .expect("Failed to parse encryption key."),
+                )
+            } else {
+                None
+            };
+
             let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path))
@@ -669,6 +704,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
+                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
             })?;
 
             drop(reader);
@@ -705,6 +741,15 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
+            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
+                Some(
+                    key.parse::<String>()
+                        .expect("Failed to parse encryption key."),
+                )
+            } else {
+                None
+            };
+
             let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path))
@@ -716,6 +761,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
+                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
             })?;
 
             let options = CheckOptions {
@@ -761,6 +807,15 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
+            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
+                Some(
+                    key.parse::<String>()
+                        .expect("Failed to parse encryption key."),
+                )
+            } else {
+                None
+            };
+
             let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path))
@@ -772,6 +827,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
+                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
             })?;
 
             drop(reader);
@@ -782,6 +838,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 null_separated,
                 paths,
                 thread_count,
+                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
             })?;
         }
         ("pack", Some(args)) => {

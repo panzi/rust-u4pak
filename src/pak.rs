@@ -20,6 +20,8 @@ use std::io::{Read, Seek, SeekFrom, BufReader};
 use crate::{Error, Record, Result};
 use crate::decode;
 use crate::decode::Decode;
+use crate::index;
+use crate::index::{Encoding, Index};
 
 pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
@@ -102,52 +104,38 @@ impl TryFrom<&str> for Variant {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Encoding {
-    ASCII,
-    Latin1,
-    UTF8,
+#[derive(Debug)]
+pub struct Options<'a> {
+    pub variant: Variant,
+    pub ignore_magic: bool,
+    pub encoding: Encoding,
+    pub force_version: Option<u32>,
+    pub encryption_key: Option<&'a str>,
 }
 
-impl Default for Encoding {
+impl Default for Options<'_> {
     fn default() -> Self {
-        Encoding::UTF8
-    }
-}
-
-impl Encoding {
-    pub fn parse_vec(self, buffer: Vec<u8>) -> Result<String> {
-        match self {
-            Encoding::UTF8 => Ok(String::from_utf8(buffer)?),
-            Encoding::ASCII => {
-                for byte in &buffer {
-                    if *byte > 0x7F {
-                        return Err(Error::new(format!(
-                            "ASCII conversion error: byte outside of ASCII range: {}",
-                            *byte)));
-                    }
-                }
-                Ok(buffer.into_iter().map(|byte| byte as char).collect())
-            }
-            Encoding::Latin1 => Ok(buffer.into_iter().map(|byte| byte as char).collect())
+        Self {
+            variant: Variant::default(),
+            ignore_magic: false,
+            encoding: Encoding::UTF8,
+            force_version: None,
+            encryption_key: None,
         }
     }
 }
 
-impl TryFrom<&str> for Encoding {
-    type Error = crate::result::Error;
-
-    fn try_from(encoding: &str) -> std::result::Result<Self, Error> {
-        if encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8") {
-            Ok(Encoding::UTF8)
-        } else if encoding.eq_ignore_ascii_case("ascii") {
-            Ok(Encoding::ASCII)
-        } else if encoding.eq_ignore_ascii_case("latin1") || encoding.eq_ignore_ascii_case("iso-8859-1") {
-            Ok(Encoding::Latin1)
-        } else {
-            Err(Error::new(format!("unsupported encoding: {:?}", encoding)))
-        }
-    }
+pub struct Footer {
+    footer_offset: u64,
+    encryption_uuid: u128,
+    encrypted: bool,
+    magic: u32,
+    version: u32,
+    index_offset: u64,
+    index_size: u64,
+    index_sha1: Sha1,
+    frozen: bool,
+    compression: [u8; 160],
 }
 
 #[derive(Debug)]
@@ -157,61 +145,7 @@ pub struct Pak {
     index_offset: u64,
     index_size: u64,
     index_sha1: Sha1,
-    mount_point: Option<String>,
-    records: Vec<Record>,
-}
-
-#[derive(Debug)]
-pub struct Options {
-    pub variant: Variant,
-    pub ignore_magic: bool,
-    pub encoding: Encoding,
-    pub force_version: Option<u32>,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            variant: Variant::default(),
-            ignore_magic: false,
-            encoding: Encoding::UTF8,
-            force_version: None,
-        }
-    }
-}
-
-pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
-    let mut buf = [0; 4];
-    reader.read_exact(&mut buf)?;
-    let size = i32::from_le_bytes(buf);
-
-    if size < 0 {
-        let utf16_size = -(size as isize) as usize;
-        let mut buf = vec![0u8; 2 * utf16_size];
-        reader.read_exact(&mut buf)?;
-
-        let mut utf16 = Vec::with_capacity(utf16_size);
-        let mut index = 0usize;
-        while index < buf.len() {
-            let bytes = [buf[index], buf[index + 1]];
-            utf16.push(u16::from_le_bytes(bytes));
-            index += 2;
-        }
-
-        if let Some(index) = utf16.iter().position(|&ch| ch == 0) {
-            utf16.truncate(index);
-        }
-
-        return Ok(String::from_utf16(&utf16)?);
-    }
-
-    let mut buf = vec![0u8; size as usize];
-    reader.read_exact(&mut buf)?;
-    if let Some(index) = buf.iter().position(|&byte| byte == 0) {
-        buf.truncate(index);
-    }
-
-    encoding.parse_vec(buf)
+    index: Index,
 }
 
 impl Pak {
@@ -222,8 +156,7 @@ impl Pak {
         index_offset: u64,
         index_size: u64,
         index_sha1: Sha1,
-        mount_point: Option<String>,
-        records: Vec<Record>,
+        index: Index,
     ) -> Self {
         Self {
             variant,
@@ -231,8 +164,7 @@ impl Pak {
             index_offset,
             index_size,
             index_sha1,
-            mount_point,
-            records,
+            index,
         }
     }
 
@@ -257,72 +189,64 @@ impl Pak {
 
     pub fn from_reader<R>(reader: &mut R, options: Options) -> Result<Pak>
     where R: Read, R: Seek {
-        let footer_offset = reader.seek(SeekFrom::End(-44))?;
+        let mut pak_file_version: u32 = 9;
+        let mut footer: Footer;
 
-        decode!(reader,
-            magic: u32,
-            version: u32,
-            index_offset: u64,
-            index_size: u64,
-            index_sha1: Sha1,
-        );
+        if options.force_version.is_some() {
+            pak_file_version = options.force_version.unwrap();
+            footer = Self::decode_footer(reader, pak_file_version)?;
+        } else {
+            loop {
+                footer = Self::decode_footer(reader, pak_file_version)?;
 
-        let version = options.force_version.unwrap_or(version);
+                if options.ignore_magic || footer.magic == 0x5A6F12E1 {
+                    break;
+                } else if pak_file_version < 1 {
+                    return Err(Error::new(format!(
+                        "illegal file magic: 0x{:X}",
+                        footer.magic
+                    )));
+                }
 
-        if !options.ignore_magic && magic != 0x5A6F12E1 {
-            return Err(Error::new(format!("illegal file magic: 0x{:X}", magic)));
+                pak_file_version -= 1;
+            }
         }
 
         let variant = options.variant;
-        let read_record = match variant {
-            Variant::ConanExiles => {
-                if version != 4 {
-                    return Err(Error::new(format!("Only know how to handle Conan Exile paks of version 4, but version was {}.", version)));
-                }
-                Record::read_conan_exiles
-            }
-            Variant::Standard => match version {
-                1 => Record::read_v1,
-                2 => Record::read_v2,
-                _ if version <= 5 || version == 7 => Record::read_v3,
-                _ => {
-                    return Err(Error::new(format!("unsupported version: {}", version)));
-                }
-            }
-        };
 
-        if index_offset + index_size > footer_offset {
+        if footer.index_offset + footer.index_size > footer.footer_offset {
             return Err(Error::new(format!(
                 "illegal index offset/size: index_offset ({}) + index_size ({}) > footer_offset ({})",
-                index_offset, index_size, footer_offset)));
+                footer.index_offset, footer.index_size, footer.footer_offset)));
         }
 
-        reader.seek(SeekFrom::Start(index_offset))?;
-        let mount_point = read_path(reader, options.encoding)?;
+        reader.seek(SeekFrom::Start(footer.index_offset))?;
+        let mut buff = vec![0; footer.index_size as usize];
+        reader.read_exact(&mut buff)?;
 
-        decode!(reader, entry_count: u32);
-
-        let mut records = Vec::with_capacity(entry_count as usize);
-
-        for _ in 0..entry_count {
-            let filename = read_path(reader, options.encoding)?;
-            let record = read_record(reader, filename)?;
-            records.push(record);
-        }
+        let index = Index::read(
+            &mut buff,
+            footer.version,
+            variant,
+            options.encoding,
+            match footer.encrypted {
+                true => options.encryption_key,
+                false => None,
+            },
+        );
 
         let pos = reader.seek(SeekFrom::Current(0))?;
-        if pos > footer_offset {
+        if pos > footer.footer_offset {
             return Err(Error::new("index bleeds into footer".to_owned()));
         }
 
         Ok(Self {
             variant,
-            version,
-            index_offset,
-            index_size,
-            index_sha1,
-            mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
-            records,
+            version: footer.version,
+            index_offset: footer.index_offset,
+            index_size: footer.index_size,
+            index_sha1: footer.index_sha1,
+            index,
         })
     }
 
@@ -353,20 +277,20 @@ impl Pak {
 
     #[inline]
     pub fn mount_point(&self) -> Option<&str> {
-        match &self.mount_point {
-            Some(mount_point) => Some(mount_point),
-            None => None
+        match &self.index.mount_point {
+            Ok(mount_point) => Some(mount_point),
+            Error => None,
         }
     }
 
     #[inline]
     pub fn records(&self) -> &[Record] {
-        &self.records
+        &self.index.records
     }
 
     #[inline]
     pub fn into_records(self) -> Vec<Record> {
-        self.records
+        self.index.records
     }
 
     //#[inline]
@@ -386,16 +310,141 @@ impl Pak {
             Variant::Standard => match version {
                 1 => V1_RECORD_HEADER_SIZE,
                 2 => V2_RECORD_HEADER_SIZE,
-                _ if version <= 5 || version == 7 => {
+                _ if version <= 5 || version == 7 || version == 9 => {
                     let mut size: u64 = V3_RECORD_HEADER_SIZE;
+
                     if let Some(blocks) = &record.compression_blocks() {
                         size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
+                        if version == 9 {
+                            size += 4;
+                        }
                     }
                     size
                 }
                 _ => {
                     panic!("unsupported version: {}", version)
                 }
+            },
+        }
+    }
+
+    pub fn footer_size(version: u32) -> i64 {
+        // Same in every version
+        let encrypted = std::mem::size_of::<bool>();
+        let magic = std::mem::size_of::<u32>();
+        let version_size = std::mem::size_of::<u32>();
+        let index_offset = std::mem::size_of::<u64>();
+        let index_size = std::mem::size_of::<u64>();
+        let index_sha1 = std::mem::size_of::<Sha1>();
+        let mut size: usize =
+            encrypted + magic + version_size + index_offset + index_size + index_sha1;
+
+        // Version 7 has encryption key guid
+        if version >= 7 {
+            size += std::mem::size_of::<u128>();
+        }
+
+        // Version 8 has Compression method
+        if version >= 8 {
+            size += std::mem::size_of::<[u8; 160]>();
+        }
+
+        // Version 9 has frozen index flag
+        if version >= 9 {
+            size += std::mem::size_of::<bool>();
+        }
+
+        return i64::try_from(size).unwrap();
+    }
+
+    pub fn decode_footer<R>(reader: &mut R, target_version: u32) -> Result<Footer>
+    where
+        R: Read,
+        R: Seek,
+    {
+        let footer_offset = reader
+            .seek(SeekFrom::End(-Self::footer_size(target_version)))
+            .expect("Failed to get footer offset.");
+
+        let encryption_uuid: u128 = 0;
+        let frozen: bool = false;
+        let compression: [u8; 160] = [0; 160];
+
+        match target_version {
+            9 => {
+                decode!(
+                    reader,
+                    encryption_uuid: u128,
+                    encrypted: bool,
+                    magic: u32,
+                    version: u32,
+                    index_offset: u64,
+                    index_size: u64,
+                    index_sha1: Sha1,
+                    frozen: bool,
+                    compression: [u8; 160]
+                );
+                return Ok(Footer {
+                    footer_offset,
+                    encryption_uuid,
+                    encrypted,
+                    magic,
+                    version,
+                    index_offset,
+                    index_size,
+                    index_sha1,
+                    frozen,
+                    compression,
+                });
+            }
+            8 => {
+                decode!(
+                    reader,
+                    encryption_uuid: u128,
+                    encrypted: bool,
+                    magic: u32,
+                    version: u32,
+                    index_offset: u64,
+                    index_size: u64,
+                    index_sha1: Sha1,
+                    frozen: bool,
+                    compression: [u8; 160]
+                );
+                return Ok(Footer {
+                    footer_offset,
+                    encryption_uuid,
+                    encrypted,
+                    magic,
+                    version,
+                    index_offset,
+                    index_size,
+                    index_sha1,
+                    frozen,
+                    compression,
+                });
+            }
+            _ => {
+                decode!(
+                    reader,
+                    encrypted: bool,
+                    magic: u32,
+                    version: u32,
+                    index_offset: u64,
+                    index_size: u64,
+                    index_sha1: Sha1,
+                );
+                return Ok(Footer {
+                    footer_offset,
+                    encryption_uuid,
+                    encrypted,
+                    magic,
+                    version,
+                    index_offset,
+                    index_size,
+                    index_sha1,
+                    frozen,
+                    compression,
+                });
             }
         }
     }
