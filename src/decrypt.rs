@@ -1,17 +1,23 @@
-use crate::{Error, Record, Result};
+// This file is part of rust-u4pak.
+//
+// rust-u4pak is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// rust-u4pak is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
+
 use aes::cipher::{BlockDecrypt, NewBlockCipher};
 use aes::{Aes256, Block};
-use base64;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::BufWriter;
-use std::io::Read;
-use std::io::Seek;
-use std::io::Write;
 
-pub fn decrypt(data: &mut Vec<u8>, base64_key: &str) {
-    let decoded_key = base64::decode(base64_key).unwrap();
-    let cipher = Aes256::new_from_slice(&decoded_key).unwrap();
+pub fn decrypt(data: &mut Vec<u8>, key: Vec<u8>) {
+    let cipher = Aes256::new_from_slice(&key).expect("Unable to convert key to Aes256 cipher");
 
     for i in 0..data.len() / 16 {
         let mut block = Block::from_mut_slice(&mut data[i * 16..i * 16 + 16]);
@@ -19,34 +25,3 @@ pub fn decrypt(data: &mut Vec<u8>, base64_key: &str) {
     }
 }
 
-pub fn decrypt_file(
-    input: &mut File,
-    output: &mut File,
-    base64_key: &str,
-    mut length: usize,
-) -> Result<bool> {
-    let decoded_key = base64::decode(base64_key).unwrap();
-    let cipher = Aes256::new_from_slice(&decoded_key).unwrap();
-
-    let mut buf_reader = BufReader::new(input);
-    let mut buf_writer = BufWriter::new(output);
-
-    length = length
-        + if length % 16 != 0 {
-            16 - length % 16
-        } else {
-            0
-        };
-    for _ in 0..length / 16 {
-        let block_buf = &mut [0u8; 16];
-        buf_reader.read_exact(block_buf)?;
-
-        let mut block = Block::from_mut_slice(block_buf);
-        cipher.decrypt_block(&mut block);
-
-        buf_writer.write(block_buf)?;
-    }
-    buf_writer.flush()?;
-
-    Ok(true)
-}

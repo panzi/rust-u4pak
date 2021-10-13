@@ -322,13 +322,13 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
         drop(result_sender);
 
         if let Some(filter) = &mut filter {
-            let records = pak.records()
+            let records = pak.index().records()
                 .iter()
                 .filter(|&record| filter.visit(record.filename()));
 
             error_count += enqueue(records, work_sender, abort_on_error, null_separated)?;
         } else {
-            error_count += enqueue(pak.records().iter(), work_sender, abort_on_error, null_separated)?;
+            error_count += enqueue(pak.index().records().iter(), work_sender, abort_on_error, null_separated)?;
         }
 
         let linesep = if options.null_separated { '\0' } else { '\n' };

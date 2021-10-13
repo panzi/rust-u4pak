@@ -1,3 +1,18 @@
+// This file is part of rust-u4pak.
+//
+// rust-u4pak is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// rust-u4pak is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
+
 use crate::decode;
 use crate::decode::Decode;
 use crate::decrypt::decrypt;
@@ -61,12 +76,12 @@ impl TryFrom<&str> for Encoding {
 
 #[derive(Debug)]
 pub struct Index {
-    pub mount_point: Result<String>,
-    pub records: Vec<Record>,
+    mount_point: Option<String>,
+    records: Vec<Record>,
 }
 
 impl Index {
-    pub(crate) fn new(mount_point: Result<String>, records: Vec<Record>) -> Self {
+    pub(crate) fn new(mount_point: Option<String>, records: Vec<Record>) -> Self {
         Self {
             mount_point,
             records,
@@ -77,22 +92,42 @@ impl Index {
         version: u32,
         variant: Variant,
         encoding: Encoding,
-        encryption_key: Option<&str>,
-    ) -> Self {
-        if encryption_key.is_some() {
-            decrypt(data, encryption_key.unwrap());
+        encryption_key: Option<Vec<u8>>,
+    ) -> Result<Self> {
+        let data_clone = &mut data.clone();
+        
+        if let Some(encryption_key) = encryption_key {
+            decrypt(data_clone, encryption_key)
         }
 
-        let decrypted_index = &mut Cursor::new(data);
+        let decrypted_index = &mut Cursor::new(data_clone);
 
-        let mount_point = read_path(decrypted_index, encoding);
+        let mount_point = read_path(decrypted_index, encoding)?;
         let records = read_records(decrypted_index, version, variant, encoding)
             .expect("Failed to read index records");
 
-        Self {
-            mount_point,
+        Ok(Self {
+            mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
             records,
+        })
+    }
+
+    #[inline]
+    pub fn mount_point(&self) -> Option<&str> {
+        match &self.mount_point {
+            Some(mount_point) => Some(mount_point),
+            None => None
         }
+    }
+
+    #[inline]
+    pub fn records(&self) -> &[Record] {
+        &self.records
+    }
+
+    #[inline]
+    pub fn into_records<'a>(self) -> Vec<Record> {
+        self.records
     }
 }
 

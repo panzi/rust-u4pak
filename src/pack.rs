@@ -441,8 +441,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     let index = Index::new(
         options
             .mount_point
-            .map(str::to_string)
-            .ok_or(Error::new(String::from("No mount path provided."))),
+            .map(str::to_string),
         records,
     );
 
@@ -732,12 +731,9 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                 }
             }
             _ => {
-                result_channel.send(Err(Error::new(format!(
-                    "{}: unsupported compression method: {} ({})",
-                    path.filename,
-                    compression_method_name(compression_method),
-                    compression_method
-                ))))?;
+                result_channel.send(Err(Error::new(
+                    format!("{}: unsupported compression method: {} ({})",
+                        path.filename, compression_method_name(compression_method), compression_method))))?;
                 break;
             }
         }

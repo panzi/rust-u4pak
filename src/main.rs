@@ -638,7 +638,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    key.parse::<String>()
+                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
                         .expect("Failed to parse encryption key."),
                 )
             } else {
@@ -650,7 +650,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
-                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
+                encryption_key
             })?;
 
             info(&pak, human_readable)?;
@@ -686,7 +686,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    key.parse::<String>()
+                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
                         .expect("Failed to parse encryption key."),
                 )
             } else {
@@ -704,7 +704,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
-                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
+                encryption_key
             })?;
 
             drop(reader);
@@ -743,7 +743,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    key.parse::<String>()
+                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
                         .expect("Failed to parse encryption key."),
                 )
             } else {
@@ -761,7 +761,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
-                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
+                encryption_key
             })?;
 
             let options = CheckOptions {
@@ -809,7 +809,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    key.parse::<String>()
+                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
                         .expect("Failed to parse encryption key."),
                 )
             } else {
@@ -827,7 +827,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 ignore_magic,
                 encoding,
                 force_version,
-                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
+                encryption_key: encryption_key.clone()
             })?;
 
             drop(reader);
@@ -838,7 +838,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 null_separated,
                 paths,
                 thread_count,
-                encryption_key: encryption_key.as_ref().and_then(|key| Some(key.as_str())),
+                encryption_key
             })?;
         }
         ("pack", Some(args)) => {

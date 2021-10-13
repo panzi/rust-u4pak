@@ -78,7 +78,7 @@ impl Decode for CompressionBlock {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
         let start_offset = u64::decode(reader)?;
-        let end_offset = u64::decode(reader)?;
+        let end_offset   = u64::decode(reader)?;
 
         Ok(Self {
             start_offset,
