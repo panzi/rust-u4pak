@@ -22,6 +22,9 @@ use crate::decode::Decode;
 use crate::encode;
 use crate::encode::Encode;
 use crate::Result;
+use crate::decrypt;
+use crate::pak::V3_RECORD_HEADER_SIZE;
+use crate::util::align;
 
 macro_rules! cmp_record_field {
     ($buf:expr, $field:ident, $r1:expr, $r2:expr) => {
@@ -193,7 +196,7 @@ impl Record {
             offset: u64,
             size: u64,
             uncompressed_size: u64,
-            compression_method: u32,
+            compression_method: u32, // i32?
             sha1: Sha1,
         );
 
@@ -217,6 +220,103 @@ impl Record {
         Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
     }
 
+    pub fn decode_entry(reader: &mut impl Read, filename: String) -> Result<Record> {
+        // Bitfield contains information about entry data:
+        // 0-5  : Compression block size
+        // 6-21 : Compression blocks count
+        // 22   : Encrypted
+        // 23-28: Compression method
+        // 29   : Size 32-bit safe?
+        // 30   : Uncompressed size 32-bit safe?
+        // 31   : Offset 32-bit safe?
+        decode!(reader, bitfield: u32);
+        let compression_method = (bitfield >> 23) & 0x3f;
+        let offset: u64;
+        let uncompressed_size: u64;
+        let size: u64;
+        let encrypted: bool = (bitfield & (1 << 22)) != 0;
+        let compression_block_count: u32 = (bitfield >> 6) & 0xffff;
+        let mut compression_block_size: u32 = (bitfield & 0x3f) << 11;
+        let mut compression_blocks: Option<Vec<CompressionBlock>> = None;
+
+        // Check if offset is 32 bit safe
+        if (bitfield & (1 << 31)) != 0 {
+            decode!(reader, x32_offset: u32);
+            offset = x32_offset as u64;
+        } else {
+            decode!(reader, x64_offset: u64);
+            offset = x64_offset;
+        }
+
+        if (bitfield & (1 << 30)) != 0 {
+            decode!(reader, x32_uncompressed_size: u32);
+            uncompressed_size = x32_uncompressed_size as u64;
+        } else {
+            decode!(reader, x64_uncompressed_size: u64);
+            uncompressed_size = x64_uncompressed_size;
+        }
+
+        if compression_method != COMPR_NONE {
+            if (bitfield & (1 << 29)) != 0 {
+                decode!(reader, x32_size: u32);
+                size = x32_size as u64;
+            } else {
+                decode!(reader, x64_size: u64);
+                size = x64_size;
+            }
+        } else {
+            size = uncompressed_size;
+        }
+
+        if compression_block_count > 0 {
+            if uncompressed_size <= 0xffff {
+                compression_block_size = uncompressed_size as u32;
+            };
+
+            if compression_block_count == 1 && !encrypted {
+                let start = Record::get_serialized_size(compression_method, compression_block_count);
+                compression_blocks = Some(vec![CompressionBlock {
+                    start_offset: start,
+                    end_offset: start + size
+                }]);
+            } else if compression_block_count > 0 {
+                let mut blocks = vec![];
+                let block_alignment = if encrypted {
+                    decrypt::BLOCK_SIZE as u64
+                } else {
+                    1
+                };
+
+                let mut start_offset = Record::get_serialized_size(compression_method, compression_block_count);
+                for _ in 0..compression_block_count {
+                    decode!(reader, block_size: u32);
+                    let end_offset = start_offset + block_size as u64;
+
+                    blocks.push(CompressionBlock {
+                        start_offset,
+                        end_offset
+                    });
+                    start_offset += align(block_size as u64, block_alignment)
+                }
+
+                compression_blocks = Some(blocks);
+            }
+        }
+
+        Ok(Self {
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            sha1: [0u8; 20],
+            compression_blocks,
+            encrypted,
+            compression_block_size,
+            timestamp: None
+        })
+    }
+
     pub fn read_conan_exiles(reader: &mut impl Read, filename: String) -> Result<Record> {
         decode!(reader,
             offset: u64,
@@ -237,6 +337,15 @@ impl Record {
         }
 
         Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+    }
+
+    fn get_serialized_size(compression_method: u32, compression_block_count: u32) -> u64 {
+        let mut serialized_size = V3_RECORD_HEADER_SIZE;
+        if compression_method != COMPR_NONE {
+            // Block info * block count
+            serialized_size += 16 * compression_block_count as u64 + 4;
+        }
+        serialized_size
     }
 
     pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {

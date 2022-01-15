@@ -47,7 +47,25 @@ impl Decode for u32 {
     }
 }
 
+impl Decode for i32 {
+    #[inline]
+    fn decode(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 4];
+        reader.read_exact(&mut buffer)?;
+        Ok(Self::from_le_bytes(buffer))
+    }
+}
+
 impl Decode for u64 {
+    #[inline]
+    fn decode(reader: &mut impl Read) -> Result<Self> {
+        let mut buffer = [0u8; 8];
+        reader.read_exact(&mut buffer)?;
+        Ok(Self::from_le_bytes(buffer))
+    }
+}
+
+impl Decode for i64 {
     #[inline]
     fn decode(reader: &mut impl Read) -> Result<Self> {
         let mut buffer = [0u8; 8];

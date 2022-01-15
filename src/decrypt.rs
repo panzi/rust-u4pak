@@ -16,11 +16,13 @@
 use aes::cipher::{BlockDecrypt, NewBlockCipher};
 use aes::{Aes256, Block};
 
+pub const BLOCK_SIZE: usize = 16;
+
 pub fn decrypt(data: &mut Vec<u8>, key: Vec<u8>) {
     let cipher = Aes256::new_from_slice(&key).expect("Unable to convert key to Aes256 cipher");
 
-    for i in 0..data.len() / 16 {
-        let mut block = Block::from_mut_slice(&mut data[i * 16..i * 16 + 16]);
+    for i in 0..data.len() / BLOCK_SIZE {
+        let mut block = Block::from_mut_slice(&mut data[i * BLOCK_SIZE..i * BLOCK_SIZE + BLOCK_SIZE]);
         cipher.decrypt_block(&mut block);
     }
 }

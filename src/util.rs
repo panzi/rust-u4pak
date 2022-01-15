@@ -189,3 +189,9 @@ pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<st
     }
     path
 }
+
+// Allign to power of 2 alignment
+pub fn align(val: u64, alignment: u64) -> u64 {
+    // Add alignment        Zero out alignment bits
+    (val + alignment - 1) & !(alignment - 1)
+}

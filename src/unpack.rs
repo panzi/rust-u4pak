@@ -14,15 +14,14 @@
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::decrypt::decrypt;
-use std::{fs::OpenOptions, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
+use std::{fs::OpenOptions, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
-use tempfile::tempfile;
 
-use crate::{Error, Result, io::transfer, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
+use crate::{Error, Result, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
 use crate::Record;
 use crate::Pak;
 use crate::Filter;
@@ -167,7 +166,6 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, optio
 }
 
 pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &mut File, outdir: impl AsRef<Path>, encryption_key: Option<Vec<u8>>) -> Result<PathBuf> {
-    let mut temp = tempfile()?;
     let header_size = pak::Pak::header_size(version, variant, record);
     
     let mut path = outdir.as_ref().to_path_buf();

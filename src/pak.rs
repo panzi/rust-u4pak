@@ -20,12 +20,12 @@ use std::io::{Read, Seek, SeekFrom, BufReader};
 use crate::{Error, Record, Result};
 use crate::decode;
 use crate::decode::Decode;
-use crate::index;
 use crate::index::{Encoding, Index};
 
 pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
+pub const PAK_MAX_SUPPORTED_VERSION: u32 = 11;
 
 pub const DEFAULT_BLOCK_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(64 * 1024) };
 pub const DEFAULT_COMPRESSION_LEVEL: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
@@ -207,7 +207,7 @@ impl Pak {
             if let Ok(version) = Self::get_version(reader) {
                 footer = Self::decode_footer(reader, version)?;
             } else if options.ignore_magic {
-                footer = Self::decode_footer(reader, 9)?;
+                footer = Self::decode_footer(reader, PAK_MAX_SUPPORTED_VERSION)?;
             } else {
                 return Err(Error::new(format!("Failed to determine pak file version.")))
             }
@@ -222,11 +222,10 @@ impl Pak {
         }
 
         reader.seek(SeekFrom::Start(footer.index_offset))?;
-        let mut buff = vec![0; footer.index_size as usize];
-        reader.read_exact(&mut buff)?;
 
         let index = Index::read(
-            &mut buff,
+            reader,
+            footer.index_size as usize,
             footer.version,
             variant,
             options.encoding,
@@ -298,12 +297,12 @@ impl Pak {
             Variant::Standard => match version {
                 1 => V1_RECORD_HEADER_SIZE,
                 2 => V2_RECORD_HEADER_SIZE,
-                _ if version <= 5 || version == 7 || version == 9 => {
+                _ if version <= 5 || version >= 7 => {
                     let mut size: u64 = V3_RECORD_HEADER_SIZE;
 
                     if let Some(blocks) = &record.compression_blocks() {
                         size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
-                        if version == 9 {
+                        if version >= 8 {
                             size += 4;
                         }
                     }
@@ -337,8 +336,8 @@ impl Pak {
             size += PAK_COMPRESSION_METHOD_SIZE;
         }
 
-        // Version 9 has frozen index flag
-        if version >= 9 {
+        // Version 9 has frozen index flag and version 10 upwards does not
+        if version == 9 {
             size += PAK_BOOL_SIZE;
         }
 
@@ -350,7 +349,7 @@ impl Pak {
         R: Read,
         R: Seek,
     {
-        // Check if version 9 footer is found
+        // Check if version >= 9 footer is found
         if let Err(error) = reader.seek(SeekFrom::End(-Self::footer_size(9) +
                 (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)) {
             return Err(Error::from(error));
@@ -427,6 +426,31 @@ impl Pak {
                     });
                 }
                 8 => {
+                    decode!(
+                        reader,
+                        encryption_uuid: u128,
+                        encrypted: bool,
+                        magic: u32,
+                        version: u32,
+                        index_offset: u64,
+                        index_size: u64,
+                        index_sha1: Sha1,
+                        compression: [u8; PAK_COMPRESSION_METHOD_SIZE]
+                    );
+                    return Ok(Footer {
+                        footer_offset: offset,
+                        encryption_uuid,
+                        encrypted,
+                        magic,
+                        version,
+                        index_offset,
+                        index_size,
+                        index_sha1,
+                        frozen,
+                        compression,
+                    });
+                }
+                _ if target_version >= 10 => {
                     decode!(
                         reader,
                         encryption_uuid: u128,

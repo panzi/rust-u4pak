@@ -20,8 +20,7 @@ use crate::Variant;
 use crate::{Error, Record, Result};
 
 use std::convert::TryFrom;
-use std::io::Cursor;
-use std::io::Read;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Encoding {
@@ -75,6 +74,26 @@ impl TryFrom<&str> for Encoding {
 }
 
 #[derive(Debug)]
+pub struct IndexLoadParams {
+    keep_full_directory: bool,
+    validate_pruning: bool,
+    delay_pruning: bool,
+    write_path_hash: bool,
+    write_full_directory_index: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SecondaryIndexInfo {
+    has_path_hash_index: bool,
+    path_hash_index_offset: i64,
+    path_hash_index_size: i64,
+    has_full_directory_index: bool,
+    full_directory_index_offset: i64,
+    full_directory_index_size: i64,
+    encoded_record_info: Vec<u8>,
+}
+
+#[derive(Debug)]
 pub struct Index {
     mount_point: Option<String>,
     records: Vec<Record>,
@@ -87,24 +106,45 @@ impl Index {
             records,
         }
     }
-    pub fn read(
-        data: &mut Vec<u8>,
+    pub fn read<R>(
+        reader: &mut R,
+        index_size: usize,
         version: u32,
         variant: Variant,
         encoding: Encoding,
         encryption_key: Option<Vec<u8>>,
-    ) -> Result<Self> {
-        let data_clone = &mut data.clone();
-        
-        if let Some(encryption_key) = encryption_key {
-            decrypt(data_clone, encryption_key)
+    ) -> Result<Self> 
+    where
+        R: Read,
+        R: Seek,
+    {
+        let mut index_buff = vec![0; index_size as usize];
+        reader.read_exact(&mut index_buff)?;
+        if let Some(encryption_key) = encryption_key.clone() {
+            decrypt(&mut index_buff, encryption_key)
         }
 
-        let decrypted_index = &mut Cursor::new(data_clone);
+        let decrypted_index = &mut Cursor::new(index_buff);
 
         let mount_point = read_path(decrypted_index, encoding)?;
-        let records = read_records(decrypted_index, version, variant, encoding)
-            .expect("Failed to read index records");
+        let records;
+        if version < 10 {
+            records = read_records_legacy(decrypted_index, version, variant, encoding)
+                .expect("Failed to read index records");
+        } else {
+            if let Ok((index_info, mut r)) = read_records(decrypted_index, encoding) {
+                if let Ok(mut sec_records) = read_secondary_index_records(reader, &index_info, encryption_key, encoding) {
+                    r.append(&mut sec_records);
+                }
+
+                records = r;
+            } else {
+                return Err(Error::new(format!(
+                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                    version
+                )));
+            }
+        };
 
         Ok(Self {
             mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
@@ -165,7 +205,7 @@ pub fn read_path(reader: &mut impl Read, encoding: Encoding) -> Result<String> {
     encoding.parse_vec(buf)
 }
 
-pub fn read_records(
+pub fn read_records_legacy(
     reader: &mut impl Read,
     version: u32,
     variant: Variant,
@@ -199,6 +239,116 @@ pub fn read_records(
         let filename = read_path(reader, encoding)?;
         let record = read_record(reader, filename)?;
         records.push(record);
+    }
+
+    Ok(records)
+}
+
+pub fn read_records(
+    reader: &mut impl Read,
+    encoding: Encoding,
+) -> Result<(SecondaryIndexInfo, Vec<Record>)> {
+    decode!(
+        reader,
+        entry_count: i32,
+        path_hash_seed: u64,
+        has_path_hash_index: u32
+    );
+
+    let mut secondary_index_info = SecondaryIndexInfo::default();
+    secondary_index_info.has_path_hash_index = has_path_hash_index != 0;
+
+    if secondary_index_info.has_path_hash_index {
+        decode!(
+            reader,
+            path_hash_index_offset: i64,
+            path_hash_index_size: i64,
+            path_hash_index_hash: [u8; 20]
+        );
+
+        secondary_index_info.has_path_hash_index = path_hash_index_size != -1;
+        secondary_index_info.path_hash_index_offset = path_hash_index_offset;
+        secondary_index_info.path_hash_index_size = path_hash_index_size;
+    }
+    decode!(reader, has_full_directory_index: u32);
+    secondary_index_info.has_full_directory_index = has_full_directory_index != 0;
+
+    if secondary_index_info.has_full_directory_index {
+        decode!(
+            reader,
+            full_directory_index_offset: i64,
+            full_directory_index_size: i64,
+            full_directory_index_hash: [u8; 20]
+        );
+        secondary_index_info.has_full_directory_index = full_directory_index_size != -1;
+        secondary_index_info.full_directory_index_offset = full_directory_index_offset;
+        secondary_index_info.full_directory_index_size = full_directory_index_size;
+    }
+    decode!(reader, pak_entries_size: i32);
+    let mut pak_entries = vec![0u8; pak_entries_size as usize];
+    reader.read_exact(&mut pak_entries)?;
+    secondary_index_info.encoded_record_info = pak_entries;
+
+    decode!(reader, file_count: u32);
+    let mut records = Vec::with_capacity(file_count as usize);
+    for _ in 0..file_count {
+        let filename = read_path(reader, encoding)?;
+        let record = Record::read_v3(reader, filename)?;
+        records.push(record);
+    }
+
+    Ok((secondary_index_info, records))
+}
+
+fn read_secondary_index_records<R>(
+    reader: &mut R,
+    index_info: &SecondaryIndexInfo,
+    encryption_key: Option<Vec<u8>>,
+    encoding: Encoding,
+) -> Result<Vec<Record>> where
+    R: Read,
+    R: Seek,
+{
+    let mut records = vec![];
+    let mut encoded_record_info = Cursor::new(&index_info.encoded_record_info[..]);
+    if index_info.has_full_directory_index {
+        let mut full_directory_index_data =
+            vec![0u8; index_info.full_directory_index_size as usize];
+        reader.seek(SeekFrom::Start(
+            index_info.full_directory_index_offset as u64,
+        ));
+        reader.read_exact(&mut full_directory_index_data);
+
+        if let Some(key) = encryption_key {
+            decrypt(&mut full_directory_index_data, key);
+        }
+
+        let mut index_buff = &full_directory_index_data[..];
+        decode!(&mut index_buff, dir_count: u32);
+        for _ in 0..dir_count {
+            let path = read_path(&mut index_buff, encoding);
+            decode!(&mut index_buff, file_count: u32);
+            let mut file_path = String::new();
+            if let Ok(p) = path {
+                if p != "/" {
+                    file_path.push_str(&p);
+                }
+            }
+            for _ in 0..file_count {
+                let file_name = read_path(&mut index_buff, encoding);
+                decode!(&mut index_buff, entry: u32);
+
+                if let Ok(name) = file_name {
+                    let mut p = file_path.clone();
+                    p.push_str(&name);
+
+                    encoded_record_info.seek(SeekFrom::Start(entry as u64));
+                    if let Ok(record) = Record::decode_entry(&mut encoded_record_info, p) {
+                        records.push(record);
+                    }
+                }
+            }
+        }
     }
 
     Ok(records)

@@ -1,0 +1,3 @@
+[submodule "pak-examples"]
+	path = pak-examples
+	url = https://github.com/Xenira/ue4-pak-examples.git
