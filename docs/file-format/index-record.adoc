@@ -1,0 +1,14 @@
+= Index Record
+
+[subs="quotes"]
+----
+*Offset  Size  Type            Description*
+     0     4  int32_t         file name size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+     4     S  char[S]         file name (includes terminating null byte)
+   4+S     ?  Record          file metadata
+_if variant == "Conan Exiles"_
+     ?     4  ?               Unknown. Only saw all 0 so far.
+_end_
+----

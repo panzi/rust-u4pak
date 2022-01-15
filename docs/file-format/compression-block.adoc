@@ -1,0 +1,18 @@
+= Compression Block (CB)
+
+[horizontal]
+Size:: 16 bytes
+
+[subs="quotes"]
+----
+*Offset  Size  Type         Description*
+     0     8  uint64_t     compressed data block start offset.
+                           version <= 4: offset is absolute to the file
+                           version 7: offset is relative to the offset
+                                      field in the corresponding Record
+     8     8  uint64_t     compressed data block end offset.
+                           There may or may not be a gap between blocks.
+                           version <= 4: offset is absolute to the file
+                           version 7: offset is relative to the offset
+                                      field in the corresponding Record
+----
