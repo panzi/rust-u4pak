@@ -238,6 +238,7 @@ This is why I've deactivated packing for versions > 3.
 
 [[fdi]]
 === Full Directory Index
+The data structure is a map<DirectoryName, map<FileName, offset>>.
 
 [subs="normal"]
 ----
