@@ -1,6 +1,6 @@
 = Rust U4Pak
 Mathias Panzenböck <grosser.meister.morti@gmx.net>; L. Sprengel <l.sprengel@pm.me>
-v1.3.0
+v1.4.0
 :icons: font
 :sectnums:
 :toc:
