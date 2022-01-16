@@ -26,7 +26,7 @@ that only a limited number of pak versions are supported.
 |8  |4.22 - 4.24 |✔️ |❌
 |9  |4.25 |✔️ |❌
 |10 |-    |✔️ |❌
-|11 |4.26 |✔️ |❌
+|11 |4.26 - 4.27 |✔️ |❌
 |====
 
 Instead of passing arguments you can also put the arguments in a file with the
@@ -224,16 +224,36 @@ _end_
 
 === Footer
 [horizontal]
-Size:: 44 bytes
+.Size
+v1 - v3:: 44 bytes
+v4 - v6:: 45 bytes
+v7:: 65 bytes
+v8:: 193 bytes
+v9:: 226 bytes
+v10 - v11:: 225 bytes
 
 [subs="quotes"]
 ----
 *Offset  Size  Type         Description*
-     0     4  uint32_t     magic: 0x5A6F12E1
-     4     4  uint32_t     version: 1, 2, 3, 4, or 7
-     8     8  uint64_t     index offset
-    16     8  uint64_t     index size
-    24    20  uint8_t[20]  index sha1 hash
+_if version >= 7_
+     0    20  uint8_t[20]  encryption key Guid
+_end_
+_if version >= 4_
+     ?     1  uint8_t      encrypted index
+_end_
+     ?     4  uint32_t     magic: 0x5A6F12E1
+   ?+4     4  uint32_t     version: 1 - 11
+   ?+8     8  uint64_t     index offset
+  ?+16     8  uint64_t     index size
+  ?+24    20  uint8_t[20]  index sha1 hash
+_if version == 9_
+  ?+44     1  uint8_t      frozen index
+_end_
+_if version == 8_
+  ?+44   128  uint8_t[128] compression methods (4 * 32 chars)
+_else if version > 8_
+     ?   160  uint8_t[160] compression methods (5 * 32 chars)
+_end_
 ----
 
 == Related Projects
