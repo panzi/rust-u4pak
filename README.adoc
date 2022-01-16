@@ -211,7 +211,37 @@ _end_
 ----
 
 === Index
+[subs="quotes,callouts"]
+.Version >= 10
+----
+*Offset  Size  Type            Description*
+     0     4  int32_t         mount point size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+     4     S  char[S]         mount point (includes terminating null byte)
+   S+4     4  int32_t         entry count
+   S+8     8  uint64_t        path hash seed <1>
+  S+16     4  uint32_t        has path hash index
+_if has path index != 0_
+  S+20     8  int64_t         path hash index offset
+  S+28     8  int64_t         path hash index size
+  S+36    20  uint8_t[20]     path hash index hash
+_end_
+     ?     4  uint32_t        has full directory index
+_if has full directory index != 0_
+   ?+4     8  int64_t         full directory index offset
+  ?+12     8                  full directory index size
+  ?+20    20  uint8_t[20]     full directory index hash
+_end_
+     ?     4  int32_t         encoded entry info size (P)
+   ?+4     P  uint8_t[P]      encoded entry info
+   ?+P     4  uint32_t        file count, probably unused / 0 (N)
+ ?+P+4     ?  IndexRecord[N]  records
+----
+<1> Needs clarification
+
 [subs="quotes"]
+.Legacy (Version < 10)
 ----
 *Offset  Size  Type            Description*
      0     4  int32_t         mount point size (S)
@@ -224,13 +254,16 @@ _end_
 
 === Footer
 [horizontal]
-.Size
-v1 - v3:: 44 bytes
-v4 - v6:: 45 bytes
-v7:: 65 bytes
-v8:: 193 bytes
-v9:: 226 bytes
-v10 - v11:: 225 bytes
+.Size and features
+|====
+|Versions |Size |Index Encryption |Encryption Key Guid |Compression method name |Frozen Index
+|v1 - v3 |44 bytes |❌ |❌ |❌ |❌
+|v4 - v6 | 45 bytes |✔️ |❌ |❌ |❌
+|v7 | 65 bytes |✔️ |✔️ |❌ |❌
+|v8 | 193 bytes |✔️ |✔️ |✔️(Max. 4) |❌
+|v9 | 226 bytes |✔️ |✔️ |✔️(Max. 5) |✔️
+|v10 - v11 | 225 bytes |✔️ |✔️ |✔️(Max. 5) |❌
+|====
 
 [subs="quotes"]
 ----
