@@ -340,6 +340,7 @@ fn read_secondary_index_records<R>(
             decode!(&mut index_buff, file_count: u32);
             let mut file_path = String::new();
             if let Ok(p) = path {
+                trace!("Reading {} files from directory {}", file_count, p);
                 if p != "/" {
                     file_path.push_str(&p);
                 }
@@ -347,6 +348,7 @@ fn read_secondary_index_records<R>(
                 warn!("Failed to resolve path for file {}. Skipping.", i);
                 continue;
             }
+
             for _ in 0..file_count {
                 let file_name = read_path(&mut index_buff, encoding);
                 decode!(&mut index_buff, entry: u32);
@@ -356,6 +358,7 @@ fn read_secondary_index_records<R>(
                     p.push_str(&name);
 
                     encoded_record_info.seek(SeekFrom::Start(entry as u64));
+                    trace!("Decoding file {} from location {}", p, entry);
                     if let Ok(record) = Record::decode_entry(&mut encoded_record_info, p.clone()) {
                         records.push(record);
                     } else {
@@ -368,6 +371,7 @@ fn read_secondary_index_records<R>(
             }
         }
     } else if index_info.has_path_hash_index {
+        warn!("Hash index is used as no full directory index was found. Filenames and paths can not be restored using this index!");
         debug!("Reading path hash index from {} with size {}", index_info.path_hash_index_offset, index_info.path_hash_index_size);
         let mut path_hash_index_data =
             vec![0u8; index_info.path_hash_index_size as usize];
@@ -387,7 +391,6 @@ fn read_secondary_index_records<R>(
         }
 
         let mut index_buff = &path_hash_index_data[..];
-        trace!("index buffer {:?}", index_buff);
         decode!(&mut index_buff, file_count: u32);
         debug!("Found {} files in hash index", file_count);
         for _ in 0..file_count {
