@@ -371,7 +371,6 @@ impl Pak {
             }
         }
 
-
         // Check if version 8 footer is found
         if reader.seek(SeekFrom::End(-Self::footer_size(8) +
                 (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)).is_ok() {
@@ -381,7 +380,6 @@ impl Pak {
             }
         }
 
-
         // Check if version <= 7 footer is found
         if reader.seek(SeekFrom::End(-Self::footer_size(7) + (PAK_BOOL_SIZE) as i64)).is_ok() {
             decode!(reader, magic: u32, version: u32);
@@ -389,7 +387,6 @@ impl Pak {
                 return Ok(version);
             }
         }
-
 
         Err(Error::new(String::from("No valid version detected")))
     }

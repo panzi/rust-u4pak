@@ -203,7 +203,7 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
     } else {
         record.size()
     } as usize;
-    
+
     let mut in_buffer = vec![0u8; buffer_length];
     in_file.read_exact(&mut in_buffer);
     

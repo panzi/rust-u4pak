@@ -21,6 +21,7 @@ use crate::{Error, Record, Result};
 
 use std::convert::TryFrom;
 use std::io::{Cursor, Read, Seek, SeekFrom};
+use log::{debug, error, trace, warn};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Encoding {
@@ -309,15 +310,24 @@ fn read_secondary_index_records<R>(
     R: Read,
     R: Seek,
 {
+    debug!("Reading secondary index");
+
     let mut records = vec![];
     let mut encoded_record_info = Cursor::new(&index_info.encoded_record_info[..]);
     if index_info.has_full_directory_index {
+        debug!("Reading full directory index");
         let mut full_directory_index_data =
             vec![0u8; index_info.full_directory_index_size as usize];
-        reader.seek(SeekFrom::Start(
+        if let Err(err) = reader.seek(SeekFrom::Start(
             index_info.full_directory_index_offset as u64,
-        ));
-        reader.read_exact(&mut full_directory_index_data);
+        )) {
+            error!("Failed to load fill directory index: {}", err);
+            return Err(Error::from(err));
+        }
+        if let Err(err) = reader.read_exact(&mut full_directory_index_data) {
+            error!("Failed to read full directory index: {}", err);
+            return Err(Error::from(err));
+        }
 
         if let Some(key) = encryption_key {
             decrypt(&mut full_directory_index_data, key);
@@ -325,7 +335,7 @@ fn read_secondary_index_records<R>(
 
         let mut index_buff = &full_directory_index_data[..];
         decode!(&mut index_buff, dir_count: u32);
-        for _ in 0..dir_count {
+        for i in 0..dir_count {
             let path = read_path(&mut index_buff, encoding);
             decode!(&mut index_buff, file_count: u32);
             let mut file_path = String::new();
@@ -333,6 +343,9 @@ fn read_secondary_index_records<R>(
                 if p != "/" {
                     file_path.push_str(&p);
                 }
+            } else {
+                warn!("Failed to resolve path for file {}. Skipping.", i);
+                continue;
             }
             for _ in 0..file_count {
                 let file_name = read_path(&mut index_buff, encoding);
@@ -343,13 +356,56 @@ fn read_secondary_index_records<R>(
                     p.push_str(&name);
 
                     encoded_record_info.seek(SeekFrom::Start(entry as u64));
-                    if let Ok(record) = Record::decode_entry(&mut encoded_record_info, p) {
+                    if let Ok(record) = Record::decode_entry(&mut encoded_record_info, p.clone()) {
                         records.push(record);
+                    } else {
+                        warn!("Failed to read record for file {}. Skipping.", p);
                     }
+                } else {
+                    warn!("Failed to resolve name for file {} in folder {}. Skipping.", i, file_path);
+                    continue;
                 }
             }
         }
+    } else if index_info.has_path_hash_index {
+        debug!("Reading path hash index from {} with size {}", index_info.path_hash_index_offset, index_info.path_hash_index_size);
+        let mut path_hash_index_data =
+            vec![0u8; index_info.path_hash_index_size as usize];
+        if let Err(err) = reader.seek(SeekFrom::Start(
+            index_info.path_hash_index_offset as u64,
+        )) {
+            error!("Failed to load fill directory index: {}", err);
+            return Err(Error::from(err));
+        }
+        if let Err(err) = reader.read_exact(&mut path_hash_index_data) {
+            error!("Failed to read full directory index: {}", err);
+            return Err(Error::from(err));
+        }
+
+        if let Some(key) = encryption_key {
+            decrypt(&mut path_hash_index_data, key);
+        }
+
+        let mut index_buff = &path_hash_index_data[..];
+        trace!("index buffer {:?}", index_buff);
+        decode!(&mut index_buff, file_count: u32);
+        debug!("Found {} files in hash index", file_count);
+        for _ in 0..file_count {
+            decode!(&mut index_buff, hash: u64, entry: u32);
+            
+            encoded_record_info.seek(SeekFrom::Start(entry as u64));
+            trace!("Decoding file {:x} from location {}", hash, entry);
+            if let Ok(record) = Record::decode_entry(&mut encoded_record_info, format!("{:x}", hash)) {
+                records.push(record);
+            } else {
+                warn!("Failed to read record for file {:x}. Skipping.", hash);
+            }
+        }
+    } else {
+        warn!("Neither full direcotry nor hash index found! Files are probably missing!");
     }
+
+    debug!("Read {} records from secondary index", records.len());
 
     Ok(records)
 }
