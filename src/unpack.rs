@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::decrypt::BLOCK_SIZE;
+use crate::util::align;
 use crate::decrypt::decrypt;
 use std::{fs::OpenOptions, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
@@ -194,12 +196,22 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
     };
     
     in_file.seek(SeekFrom::Start(record.offset() + header_size))?;
-    let mut in_buffer = vec![0u8; record.size() as usize];
+
+    // Encrypted files need to be read in 16 byte blocks
+    let buffer_length = if record.encrypted() {
+        align(record.size(), BLOCK_SIZE as u64)
+    } else {
+        record.size()
+    } as usize;
+    
+    let mut in_buffer = vec![0u8; buffer_length];
     in_file.read_exact(&mut in_buffer);
     
     if record.encrypted() {
         if let Some(key) = encryption_key {
             decrypt(&mut in_buffer, key);
+            // Trim padded bytes from undersized encryption blocks
+            in_buffer = in_buffer[..record.size() as usize].to_vec();
         } else {
             return Err(Error::new(
                 "File is encrypted, but no encryption key was provided".to_string(),

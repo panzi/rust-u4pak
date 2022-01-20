@@ -20,10 +20,10 @@ pub const BLOCK_SIZE: usize = 16;
 
 pub fn decrypt(data: &mut Vec<u8>, key: Vec<u8>) {
     let cipher = Aes256::new_from_slice(&key).expect("Unable to convert key to Aes256 cipher");
+    assert_eq!(data.len() % 16, 0, "Data length must be a multiple of 16");
 
-    for i in 0..data.len() / BLOCK_SIZE {
-        let mut block = Block::from_mut_slice(&mut data[i * BLOCK_SIZE..i * BLOCK_SIZE + BLOCK_SIZE]);
-        cipher.decrypt_block(&mut block);
+    for block in data.chunks_mut(BLOCK_SIZE) {
+        cipher.decrypt_block(Block::from_mut_slice(block));
     }
 }
 
