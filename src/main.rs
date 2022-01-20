@@ -20,6 +20,7 @@ use pak::{COMPR_NONE, Variant};
 use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
 use std::io::BufReader;
 use std::fs::File;
+use env_logger::Env;
 
 #[cfg(target_family="windows")]
 use std::convert::TryFrom;
@@ -569,6 +570,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
 }
 
 fn main() {
+    env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
     let args_from_file = match args::get_args_from_file() {
         Ok(args_from_file) => args_from_file,
         Err(error) => {
