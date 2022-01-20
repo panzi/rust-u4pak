@@ -747,7 +747,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             uncompressed_size,
             compression_method,
             timestamp,
-            sha1,
+            Some(sha1),
             compression_blocks,
             false,
             compression_block_size,

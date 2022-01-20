@@ -131,7 +131,7 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
                 } else if version >= 3 {
                     row.push(if record.encrypted() { "Encrypted" } else { "-" }.to_string());
                 }
-                row.push(HexDisplay::new(record.sha1()).to_string());
+                row.push(HexDisplay::new(&record.sha1().unwrap_or([0u8; 20])).to_string());
                 row.push(record.filename().to_owned());
                 body.push(row);
             }

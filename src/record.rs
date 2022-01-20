@@ -42,7 +42,7 @@ pub struct Record {
     uncompressed_size: u64,
     compression_method: u32,
     timestamp: Option<u64>,
-    sha1: Sha1,
+    sha1: Option<Sha1>,
     compression_blocks: Option<Vec<CompressionBlock>>,
     encrypted: bool,
     compression_block_size: u32,
@@ -63,7 +63,7 @@ impl Record {
         uncompressed_size: u64,
         compression_method: u32,
         timestamp: Option<u64>,
-        sha1: Sha1,
+        sha1: Option<Sha1>,
         compression_blocks: Option<Vec<CompressionBlock>>,
         encrypted: bool,
         compression_block_size: u32,
@@ -82,7 +82,7 @@ impl Record {
         }
     }
 
-    pub fn v1(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, timestamp: u64, sha1: Sha1) -> Self {
+    pub fn v1(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, timestamp: u64, sha1: Option<Sha1>) -> Self {
         Self {
             filename,
             offset,
@@ -97,7 +97,7 @@ impl Record {
         }
     }
 
-    pub fn v2(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Sha1) -> Self {
+    pub fn v2(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Option<Sha1>) -> Self {
         Self {
             filename,
             offset,
@@ -112,7 +112,7 @@ impl Record {
         }
     }
 
-    pub fn v3(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Sha1,
+    pub fn v3(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Option<Sha1>,
               compression_blocks: Option<Vec<CompressionBlock>>, encrypted: bool, compression_block_size: u32) -> Self {
         Self {
             filename,
@@ -159,7 +159,7 @@ impl Record {
     }
 
     #[inline]
-    pub fn sha1(&self) -> &Sha1 {
+    pub fn sha1(&self) -> &Option<Sha1> {
         &self.sha1
     }
 
@@ -188,7 +188,7 @@ impl Record {
             sha1: Sha1,
         );
 
-        Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, sha1))
+        Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, Some(sha1)))
     }
 
     pub fn read_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -200,7 +200,7 @@ impl Record {
             sha1: Sha1,
         );
 
-        Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, sha1))
+        Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, Some(sha1)))
     }
 
     pub fn read_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -217,7 +217,7 @@ impl Record {
             compression_block_size: u32,
         );
 
-        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, Some(sha1), compression_blocks, encrypted != 0, compression_block_size))
     }
 
     pub fn decode_entry(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -303,18 +303,7 @@ impl Record {
             }
         }
 
-        Ok(Self {
-            filename,
-            offset,
-            size,
-            uncompressed_size,
-            compression_method,
-            sha1: [0u8; 20],
-            compression_blocks,
-            encrypted,
-            compression_block_size,
-            timestamp: None
-        })
+        Ok(Self::new(filename, offset, size, uncompressed_size, compression_method, None, None, compression_blocks, encrypted, compression_block_size))
     }
 
     pub fn read_conan_exiles(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -336,7 +325,7 @@ impl Record {
             eprintln!("{}: WARNING: unknown field has other value than 0: {}", filename, unknown);
         }
 
-        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, sha1, compression_blocks, encrypted != 0, compression_block_size))
+        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, Some(sha1), compression_blocks, encrypted != 0, compression_block_size))
     }
 
     fn get_serialized_size(compression_method: u32, compression_block_count: u32) -> u64 {
@@ -355,7 +344,7 @@ impl Record {
             self.uncompressed_size,
             self.compression_method,
             self.timestamp.unwrap_or(0),
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
         );
         Ok(())
     }
@@ -367,7 +356,7 @@ impl Record {
             self.uncompressed_size,
             self.compression_method,
             self.timestamp.unwrap_or(0),
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
         );
         Ok(())
     }
@@ -378,7 +367,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
         );
         Ok(())
     }
@@ -389,7 +378,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
         );
         Ok(())
     }
@@ -400,7 +389,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -416,7 +405,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -432,7 +421,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -449,7 +438,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1,
+            self.sha1.unwrap_or([0u8; 20]),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -485,8 +474,8 @@ impl Record {
 
         if self.sha1 != other.sha1 {
             let _ = write!(buf, "\tsha1: {} != {}",
-                HexDisplay::new(&self.sha1),
-                HexDisplay::new(&other.sha1));
+                HexDisplay::new(&self.sha1.unwrap_or([0u8; 20])),
+                HexDisplay::new(&other.sha1.unwrap_or([0u8; 20])));
         }
 
         if self.compression_blocks != other.compression_blocks {
