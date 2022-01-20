@@ -3,7 +3,7 @@ Mathias Panzenböck <grosser.meister.morti@gmx.net>; L. Sprengel <l.sprengel@pm.
 v1.4.0
 :icons: font
 :sectnums:
-:toc:
+:toc: left
 :toclevels: 3
 
 More or less re-implementation of https://github.com/panzi/u4pak[Python U4Pak]
