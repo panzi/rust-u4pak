@@ -42,7 +42,9 @@ pub const CONAN_EXILE_RECORD_HEADER_SIZE: u64 = 57;
 pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
 
 pub const PAK_BOOL_SIZE: usize = 1;
-pub const PAK_COMPRESSION_METHOD_SIZE: usize = 160;
+pub const V8_PAK_COMPRESSION_METHOD_COUNT: usize = 4;
+pub const PAK_COMPRESSION_METHOD_COUNT: usize = 5;
+pub const PAK_COMPRESSION_METHOD_SIZE: usize = 32;
 pub const PAK_ENCRYPTION_GUID_SIZE: usize = std::mem::size_of::<u128>();
 
 pub const COMPR_METHODS: [u32; 4] = [COMPR_NONE, COMPR_ZLIB, COMPR_BIAS_MEMORY, COMPR_BIAS_SPEED];
@@ -139,7 +141,7 @@ pub struct Footer {
     index_size: u64,
     index_sha1: Sha1,
     frozen: bool,
-    compression: [u8; 160],
+    compression: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -332,8 +334,10 @@ impl Pak {
         }
 
         // Version 8 has Compression method
-        if version >= 8 {
-            size += PAK_COMPRESSION_METHOD_SIZE;
+        if version == 8 {
+            size += V8_PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE;
+        } else if version > 8 {
+            size += PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE;
         }
 
         // Version 9 has frozen index flag and version 10 upwards does not
@@ -349,37 +353,43 @@ impl Pak {
         R: Read,
         R: Seek,
     {
-        // Check if version >= 9 footer is found
-        if let Err(error) = reader.seek(SeekFrom::End(-Self::footer_size(9) +
-                (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)) {
-            return Err(Error::from(error));
+        // Check if version >= 10 footer is found
+        if reader.seek(SeekFrom::End(-Self::footer_size(10) +
+                (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)).is_ok() {
+            decode!(reader, magic: u32, version: u32);
+            if magic == PAK_MAGIC {
+                return Ok(version);
+            }
         }
 
-        decode!(reader, magic: u32, version: u32);
-        if magic == PAK_MAGIC {
-            return Ok(version);
+        // Check if version 9 footer is found
+        if reader.seek(SeekFrom::End(-Self::footer_size(9) +
+                (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)).is_ok() {
+            decode!(reader, magic: u32, version: u32);
+            if magic == PAK_MAGIC {
+                return Ok(version);
+            }
         }
+
 
         // Check if version 8 footer is found
-        if let Err(error) = reader.seek(SeekFrom::End(-Self::footer_size(8) +
-                (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)) {
-            return Err(Error::from(error));
+        if reader.seek(SeekFrom::End(-Self::footer_size(8) +
+                (PAK_ENCRYPTION_GUID_SIZE + PAK_BOOL_SIZE) as i64)).is_ok() {
+            decode!(reader, magic: u32, version: u32);
+            if magic == PAK_MAGIC {
+                return Ok(version);
+            }
         }
 
-        decode!(reader, magic: u32, version: u32);
-        if magic == PAK_MAGIC {
-            return Ok(version);
-        }
 
         // Check if version <= 7 footer is found
-        if let Err(error) = reader.seek(SeekFrom::End(-Self::footer_size(7) + (PAK_BOOL_SIZE) as i64)) {
-            return Err(Error::from(error));
+        if reader.seek(SeekFrom::End(-Self::footer_size(7) + (PAK_BOOL_SIZE) as i64)).is_ok() {
+            decode!(reader, magic: u32, version: u32);
+            if magic == PAK_MAGIC {
+                return Ok(version);
+            }
         }
 
-        decode!(reader, magic: u32, version: u32);
-        if magic == PAK_MAGIC {
-            return Ok(version);
-        }
 
         Err(Error::new(String::from("No valid version detected")))
     }
@@ -396,7 +406,6 @@ impl Pak {
             
             let encryption_uuid: u128 = 0;
             let frozen: bool = false;
-            let compression: [u8; PAK_COMPRESSION_METHOD_SIZE] = [0; PAK_COMPRESSION_METHOD_SIZE];
             
             match target_version {
                 9 => {
@@ -410,7 +419,7 @@ impl Pak {
                         index_size: u64,
                         index_sha1: Sha1,
                         frozen: bool,
-                        compression: [u8; PAK_COMPRESSION_METHOD_SIZE]
+                        compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
                     return Ok(Footer {
                         footer_offset: offset,
@@ -422,7 +431,7 @@ impl Pak {
                         index_size,
                         index_sha1,
                         frozen,
-                        compression,
+                        compression: compression.to_vec(),
                     });
                 }
                 8 => {
@@ -435,7 +444,7 @@ impl Pak {
                         index_offset: u64,
                         index_size: u64,
                         index_sha1: Sha1,
-                        compression: [u8; PAK_COMPRESSION_METHOD_SIZE]
+                        compression: [u8; V8_PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
                     return Ok(Footer {
                         footer_offset: offset,
@@ -447,7 +456,7 @@ impl Pak {
                         index_size,
                         index_sha1,
                         frozen,
-                        compression,
+                        compression: compression.to_vec(),
                     });
                 }
                 _ if target_version >= 10 => {
@@ -460,7 +469,7 @@ impl Pak {
                         index_offset: u64,
                         index_size: u64,
                         index_sha1: Sha1,
-                        compression: [u8; PAK_COMPRESSION_METHOD_SIZE]
+                        compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
                     return Ok(Footer {
                         footer_offset: offset,
@@ -472,7 +481,7 @@ impl Pak {
                         index_size,
                         index_sha1,
                         frozen,
-                        compression,
+                        compression: compression.to_vec(),
                     });
                 }
                 _ => {
@@ -495,7 +504,7 @@ impl Pak {
                         index_size,
                         index_sha1,
                         frozen,
-                        compression,
+                        compression: vec![],
                     });
                 }
             }
