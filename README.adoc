@@ -15,7 +15,7 @@ that only a limited number of pak versions are supported.
 
 .Supported Versions
 |====
-|Pak Version| Unreal Engine Version |Reading |Writing
+|Pak Version |Unreal Engine Version |Reading |Writing
 |1  |< 4.0 |✔️ |✔️
 |2  |4.0 - 4.2 |✔️ |✔️
 |3  |4.3 - 4.15 |✔️ |✔️
@@ -27,6 +27,15 @@ that only a limited number of pak versions are supported.
 |9  |4.25 |✔️ |❌
 |10 |-    |✔️ |❌
 |11 |4.26 - 4.27 |✔️ |❌
+|====
+
+.Supported Compression
+|====
+|Name |Supported
+|None |✔️
+|https://zlib.net[Zlib] |✔️
+|https://www.gnu.org/software/gzip/[Gzip] |❌
+|https://lz4.github.io/lz4/[LZ4] |❌
 |====
 
 Instead of passing arguments you can also put the arguments in a file with the
