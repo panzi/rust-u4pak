@@ -16,8 +16,8 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 
-use crate::result::{Result, Error};
-use crate::record::Record;
+use u4pak::result::{Result, Error};
+use u4pak::record::Record;
 
 #[derive(Debug)]
 pub enum SortKey {

@@ -39,7 +39,7 @@ pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, size:
 #[cfg(not(target_os = "linux"))]
 pub fn transfer(in_file: &mut std::fs::File, out_file: &mut std::fs::File, size: usize) -> std::io::Result<()> {
     use std::io::{Read, Write};
-    use crate::pak::BUFFER_SIZE;
+    use u4pak::pak::BUFFER_SIZE;
 
     // needs to be heap allocated since Windows has small stack sizes
     let mut buf = vec![0u8; std::cmp::min(BUFFER_SIZE, size)];

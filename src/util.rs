@@ -13,7 +13,12 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::io::Read;
 use std::str::FromStr;
+use core::num::NonZeroU32;
+use openssl::sha::Sha1 as OpenSSLSha1;
+
+use crate::{Result, Error};
 
 pub fn format_size(size: u64) -> String {
     if size >= 1024 * 1024 * 1024 * 1024 * 1024 * 1024 {
@@ -194,4 +199,44 @@ pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<st
 pub fn align(val: u64, alignment: u64) -> u64 {
     // Add alignment        Zero out alignment bits
     (val + alignment - 1) & !(alignment - 1)
+}
+
+pub const COMPR_LEVEL_FAST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+pub const COMPR_LEVEL_DEFAULT: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
+pub const COMPR_LEVEL_BEST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(9) };
+
+pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
+    if value.eq_ignore_ascii_case("best") {
+        Ok(COMPR_LEVEL_BEST)
+    } else if value.eq_ignore_ascii_case("fast") {
+        Ok(COMPR_LEVEL_FAST)
+    } else if value.eq_ignore_ascii_case("default") {
+        Ok(COMPR_LEVEL_DEFAULT)
+    } else {
+        match value.parse() {
+            Ok(level) if level > 0 && level < 10 => {
+                Ok(NonZeroU32::new(level).unwrap())
+            }
+            _ => {
+                return Err(Error::new(format!(
+                    "illegal compression level: {:?}",
+                    value)));
+            }
+        }
+    }
+}
+
+pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
+    let mut hasher = OpenSSLSha1::new();
+    let mut buffer = [0; 1024];
+
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+
+    Ok(hasher.finish())
 }

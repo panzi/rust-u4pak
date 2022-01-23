@@ -1,9 +1,17 @@
 [package]
 name = "u4pak"
 version = "1.3.0"
-authors = ["Mathias Panzenböck <grosser.meister.morti@gmx.net>"]
+authors = ["Mathias Panzenböck <grosser.meister.morti@gmx.net>", "L. Sprengel <l.sprengel@pm.me>"]
 edition = "2018"
 license-file = "LICENSE.txt"
+
+[[bin]]
+name="u4pak"
+path="src/bin/u4pak/main.rs"
+
+[lib]
+name="u4pak"
+path="src/lib.rs"
 
 [dependencies]
 clap = "2.33.3"
