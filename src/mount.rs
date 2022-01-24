@@ -121,7 +121,7 @@ impl U4PakFS {
 
         let version = pak.version();
         let variant = pak.variant();
-        for record in pak.records() {
+        for record in pak.index().records() {
             u4pakfs.insert(variant, version, record)?;
         }
 

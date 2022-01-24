@@ -22,6 +22,7 @@ use u4pak::util::{format_size, print_table, Align::*};
 use u4pak::result::Result;
 use u4pak::record::Record;
 use u4pak::pak::{Pak, compression_method_name, HexDisplay};
+use u4pak::check::NULL_SHA1;
 use crate::sort::{sort, Order};
 
 #[derive(Debug, PartialEq)]
@@ -132,7 +133,7 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
                 } else if version >= 3 {
                     row.push(if record.encrypted() { "Encrypted" } else { "-" }.to_string());
                 }
-                row.push(HexDisplay::new(&record.sha1().unwrap_or([0u8; 20])).to_string());
+                row.push(HexDisplay::new(record.sha1().as_ref().unwrap_or(&NULL_SHA1)).to_string());
                 row.push(record.filename().to_owned());
                 body.push(row);
             }
