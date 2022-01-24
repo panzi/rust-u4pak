@@ -46,9 +46,7 @@ pub mod args;
 pub mod io;
 
 #[cfg(target_os = "linux")]
-pub mod mount;
-#[cfg(target_os = "linux")]
-pub use mount::{mount, MountOptions};
+pub use u4pak::mount::{mount, MountOptions};
 
 fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
     if let Some(arg_paths) = args.values_of("paths") {
@@ -500,6 +498,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
             .arg(arg_ignore_magic())
             .arg(arg_encoding())
             .arg(arg_force_version())
+            .arg(arg_encryption_key())
             .arg(
                 Arg::with_name("foregound")
                     .long("foreground")
@@ -925,6 +924,18 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
+            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
+                Some(
+                    base64::decode(
+                        key.parse::<String>()
+                            .expect("Failed to read encryption key."),
+                    )
+                    .expect("Failed to parse encryption key."),
+                )
+            } else {
+                None
+            };
+
             let mut file = match File::open(path) {
                 Ok(file) => file,
                 Err(error) => return Err(Error::io_with_path(error, path)),
@@ -938,6 +949,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                     ignore_magic,
                     encoding,
                     force_version,
+                    encryption_key,
                 },
             )?;
 

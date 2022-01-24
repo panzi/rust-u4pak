@@ -22,3 +22,6 @@ pub mod check;
 
 pub mod reopen;
 pub mod walkdir;
+
+#[cfg(target_os = "linux")]
+pub mod mount;
