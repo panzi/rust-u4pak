@@ -7,6 +7,7 @@
 use std::{convert::TryFrom, fmt::Display, num::NonZeroU32, path::Path, usize};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
+use log::{debug};
 
 use crate::{Error, Record, Result};
 use crate::decode;
@@ -33,7 +34,8 @@ pub const CONAN_EXILE_RECORD_HEADER_SIZE: u64 = 57;
 pub const COMPRESSION_BLOCK_HEADER_SIZE: u64 = 16;
 
 pub const PAK_BOOL_SIZE: usize = 1;
-pub const V8_PAK_COMPRESSION_METHOD_COUNT: usize = 4;
+// TODO: Version 8 can have a max of 4 (version 4.22) or 5 (version 4.23-4.24)
+pub const V8_PAK_COMPRESSION_METHOD_COUNT: usize = 5;
 pub const PAK_COMPRESSION_METHOD_COUNT: usize = 5;
 pub const PAK_COMPRESSION_METHOD_SIZE: usize = 32;
 pub const PAK_ENCRYPTION_GUID_SIZE: usize = std::mem::size_of::<u128>();
@@ -198,6 +200,7 @@ impl Pak {
             }
         } else {
             if let Ok(version) = Self::get_version(reader) {
+                debug!("Determined pak version {}", version);
                 footer = Self::decode_footer(reader, version)?;
             } else if options.ignore_magic {
                 footer = Self::decode_footer(reader, PAK_MAX_SUPPORTED_VERSION)?;
@@ -310,14 +313,17 @@ impl Pak {
 
     pub fn footer_size(version: u32) -> i64 {
         // Same in every version
-        let encrypted = PAK_BOOL_SIZE;
         let magic = std::mem::size_of::<u32>();
         let version_size = std::mem::size_of::<u32>();
         let index_offset = std::mem::size_of::<u64>();
         let index_size = std::mem::size_of::<u64>();
         let index_sha1 = std::mem::size_of::<Sha1>();
-        let mut size: usize =
-            encrypted + magic + version_size + index_offset + index_size + index_sha1;
+        let mut size: usize = magic + version_size + index_offset + index_size + index_sha1;
+
+        // Version >= 4 has encrypted index flag
+        if version >= 4 {
+            size += PAK_BOOL_SIZE;
+        }
 
         // Version 7 has encryption key guid
         if version >= 7 {
@@ -379,6 +385,14 @@ impl Pak {
             }
         }
 
+        // Check if version <= 3 footer is found
+        if reader.seek(SeekFrom::End(-Self::footer_size(3) as i64)).is_ok() {
+            decode!(reader, magic: u32, version: u32);
+            if magic == PAK_MAGIC {
+                return Ok(version);
+            }
+        }
+
         Err(Error::new(String::from("No valid version detected")))
     }
 
@@ -396,6 +410,31 @@ impl Pak {
             let frozen: bool = false;
             
             match target_version {
+                _ if target_version >= 10 => {
+                    decode!(
+                        reader,
+                        encryption_uuid: u128,
+                        encrypted: bool,
+                        magic: u32,
+                        version: u32,
+                        index_offset: u64,
+                        index_size: u64,
+                        index_sha1: Sha1,
+                        compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
+                    );
+                    return Ok(Footer {
+                        footer_offset: offset,
+                        encryption_uuid,
+                        encrypted,
+                        magic,
+                        version,
+                        index_offset,
+                        index_size,
+                        index_sha1,
+                        frozen,
+                        compression: compression.to_vec(),
+                    });
+                }
                 9 => {
                     decode!(
                         reader,
@@ -447,7 +486,7 @@ impl Pak {
                         compression: compression.to_vec(),
                     });
                 }
-                _ if target_version >= 10 => {
+                7 => {
                     decode!(
                         reader,
                         encryption_uuid: u128,
@@ -456,8 +495,7 @@ impl Pak {
                         version: u32,
                         index_offset: u64,
                         index_size: u64,
-                        index_sha1: Sha1,
-                        compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
+                        index_sha1: Sha1
                     );
                     return Ok(Footer {
                         footer_offset: offset,
@@ -469,10 +507,10 @@ impl Pak {
                         index_size,
                         index_sha1,
                         frozen,
-                        compression: compression.to_vec(),
+                        compression: vec![],
                     });
                 }
-                _ => {
+                _ if target_version >= 4 => {
                     decode!(
                         reader,
                         encrypted: bool,
@@ -486,6 +524,28 @@ impl Pak {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
+                        magic,
+                        version,
+                        index_offset,
+                        index_size,
+                        index_sha1,
+                        frozen,
+                        compression: vec![],
+                    });
+                }
+                _ => {
+                    decode!(
+                        reader,
+                        magic: u32,
+                        version: u32,
+                        index_offset: u64,
+                        index_size: u64,
+                        index_sha1: Sha1,
+                    );
+                    return Ok(Footer {
+                        footer_offset: offset,
+                        encryption_uuid,
+                        encrypted: false,
                         magic,
                         version,
                         index_offset,
