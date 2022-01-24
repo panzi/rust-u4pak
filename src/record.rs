@@ -344,7 +344,7 @@ impl Record {
             self.uncompressed_size,
             self.compression_method,
             self.timestamp.unwrap_or(0),
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
         );
         Ok(())
     }
@@ -356,7 +356,7 @@ impl Record {
             self.uncompressed_size,
             self.compression_method,
             self.timestamp.unwrap_or(0),
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
         );
         Ok(())
     }
@@ -367,7 +367,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
         );
         Ok(())
     }
@@ -378,7 +378,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
         );
         Ok(())
     }
@@ -389,7 +389,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -405,7 +405,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -421,7 +421,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -438,7 +438,7 @@ impl Record {
             self.size,
             self.uncompressed_size,
             self.compression_method,
-            self.sha1.unwrap_or([0u8; 20]),
+            self.sha1.as_ref().unwrap_or(&NULL_SHA1),
             if let Some(blocks) = &self.compression_blocks {
                 blocks [u32],
             }
@@ -474,8 +474,8 @@ impl Record {
 
         if self.sha1 != other.sha1 {
             let _ = write!(buf, "\tsha1: {} != {}",
-                HexDisplay::new(&self.sha1.unwrap_or([0u8; 20])),
-                HexDisplay::new(&other.sha1.unwrap_or([0u8; 20])));
+                HexDisplay::new(self.sha1.as_ref().unwrap_or(&NULL_SHA1)),
+                HexDisplay::new(other.sha1.as_ref().unwrap_or(&NULL_SHA1)));
         }
 
         if self.compression_blocks != other.compression_blocks {
