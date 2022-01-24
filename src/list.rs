@@ -65,7 +65,7 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
     match (options.order, options.paths) {
         (Some(order), Some(paths)) => {
             let mut filter = Filter::from_paths(paths.iter().cloned());
-            let mut records = pak.records()
+            let mut records = pak.index().records()
                 .iter()
                 .filter(|record| filter.visit(record.filename()))
                 .collect();
@@ -75,14 +75,14 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
             filter.assert_all_visited()?;
         }
         (Some(order), None) => {
-            let mut records = pak.into_records();
+            let mut records = pak.index().records().iter().collect();
 
             sort(&mut records, order);
             list_records(version, &records, options)?;
         }
         (None, Some(paths)) => {
             let mut filter = Filter::from_paths(paths.iter().cloned());
-            let records = pak.records()
+            let records = pak.index().records()
                 .iter()
                 .filter(|record| filter.visit(record.filename()))
                 .collect::<Vec<_>>();
@@ -91,7 +91,7 @@ pub fn list(pak: Pak, options: ListOptions) -> Result<()> {
             filter.assert_all_visited()?;
         }
         (None, None) => {
-            list_records(version, pak.records(), options)?;
+            list_records(version, pak.index().records(), options)?;
         }
     }
 
@@ -131,7 +131,7 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
                 } else if version >= 3 {
                     row.push(if record.encrypted() { "Encrypted" } else { "-" }.to_string());
                 }
-                row.push(HexDisplay::new(record.sha1()).to_string());
+                row.push(HexDisplay::new(&record.sha1().unwrap_or([0u8; 20])).to_string());
                 row.push(record.filename().to_owned());
                 body.push(row);
             }

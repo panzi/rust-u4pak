@@ -1,0 +1,394 @@
+= Rust U4Pak
+Mathias Panzenböck <grosser.meister.morti@gmx.net>; L. Sprengel <l.sprengel@pm.me>
+v1.4.0
+:icons: font
+:sectnums:
+:toc: left
+:toclevels: 3
+
+More or less re-implementation of https://github.com/panzi/u4pak[Python U4Pak]
+for fun, ease of use (standalone binary), and speed (multi-threading).
+
+This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4
+packages. Under Linux it can also be used to read-only FUSE-mount archives. Note
+that only a limited number of pak versions are supported.
+
+.Supported Versions
+|====
+|Pak Version |Unreal Engine Version |Reading |Writing
+|1  |< 4.0 |✔️ |✔️
+|2  |4.0 - 4.2 |✔️ |✔️
+|3  |4.3 - 4.15 |✔️ |✔️
+|4  |4.16 - 4.19 |✔️ |❌
+|5  |4.20 |✔️ |❌
+|6  |- |✔️ |❌
+|7  |4.21 |✔️ |❌
+|8  |4.22 - 4.24 |✔️ |❌
+|9  |4.25 |✔️ |❌
+|10 |-    |✔️ |❌
+|11 |4.26 - 4.27 |✔️ |❌
+|====
+
+.Supported Compression
+|====
+|Name |Supported
+|None |✔️
+|https://zlib.net[Zlib] |✔️
+|https://www.gnu.org/software/gzip/[Gzip] |❌
+|https://lz4.github.io/lz4/[LZ4] |❌
+|====
+
+Instead of passing arguments you can also put the arguments in a file with the
+extension .u4pak and pass the path to that instead. This is useful for Windows
+users that aren't used to a terminal. You can even associate the extension with
+u4pak.exe so that it will be automatically opened with it when you double click
+it. File paths in a .u4pak file are relative to the directory containing the
+file. The syntax of these files is not shell syntax. If you don't have any white
+space, double quotes (`"`), or hash marks (`#`) in your file names you don't have
+to worry about anything. `#` is used to start a comment line (only if it doesn't
+touch any non-white space on it's left) and `"` is used to quote arguments
+containing white space, `#`, or `"`. In order to write a `"` in a quoted argument
+you simply need to double it, meaning an argument that contains nothing but a
+single `"` is written as `""""`. Newlines are ignored like any other white space.
+An example .u4pak file whould be:
+
+```sh
+# This is packing my project:
+pack
+--version=4
+--mount-point=../../..
+
+"C:\Users\Alice\My Documents\U4Project\NewArchive.pak"
+
+":rename=/:C:\Users\Alice\My Documents\U4Project\Some Files"
+":zlib,rename=/:Some Other Files"
+```
+
+If u4pak.exe is run by double clicking or by dropping a .u4pak file on it it
+won't immediately close the terminal window, but will instead ask you to press
+ENTER. It does this so you have a chance to read the output. Since I don't use
+Windows (I cross compile on Linux and test with Wine) I could not test this
+particular feature. If it doesn't work please report a bug. In order to force
+the "Press ENTER to continue..." message you can pass the argument
+`--pause-on-exit=always` (Windows-only).
+
+== Usage
+
+`u4pak [--pause-on-exit=<always|never|auto>] [SUBCOMMAND]`
+
+Or:
+
+`u4pak "C:\Path\to\arguments.u4pak"`
+
+== Sub-Commands
+
+|====
+| Sub-Command |Description
+| check       | Check consistency of a package
+| help        | Prints general help message or the help of the given subcommand(s)
+| info        | Show summarized information of a package
+| list        | List content of a package
+| mount       | Mount package as read-only filesystem (Linux-only)
+| pack        | Create a new package
+| unpack      | Unpack content of a package
+|====
+
+For help to the various sub-commands run `u4pak help SUBCOMMAND`.
+
+== File Format
+
+Byte order is little endian and the character encoding of file names seems to be
+ASCII (or ISO-8859-1/UTF-8 that coincidentally only uses ASCII compatiple
+characters).
+
+Offsets and sizes seem to be 64bit or at least unsigned 32bit integers. If
+interpreted as 32bit integers all sizes (except the size of file names) and offsets
+are followed by another 32bit integer of the value 0, which makes me guess these
+are 64bit values. Also some values exceed the range of signed 32bit integers, so
+they have to be at least unsigned 32bit integers.
+
+This information was reverse engineered from the Elemental
+https://wiki.unrealengine.com/Linux_Demos[Demo] for Linux (which contains a 2.5
+GB .pak file), the https://www.techpowerup.com/download/unreal-engine-4-five-tech-demos/[Unreal Engine 4 - Five Tech Demos],
+version 7 was reverse engineered from the https://store.steampowered.com/app/813630/Supraland/[Supraland Demo],
+and the Conan Exiles variant was reverse egineered from the
+https://steamcommunity.com/sharedfiles/filedetails/?id=1765361591[SandstormFix_EXP workshop item].
+Reverse engineering was done by poking around the pak files with a hex editor,
+no kind of decompilation was done by me.
+
+Versions >= 8 where reversed from an empty unreal engine project.
+
+.Basic layout
+* Data Records
+* Index
+** Index Header
+** Index Records
+* Footer
+
+In order to parse a file you need to read the footer first. The footer contains
+an offset pointer to the start of the index records. The index records then
+contain offset pointers to the data records.
+
+[[encoded-record]]
+=== Encoded Record
+
+[subs="quotes"]
+----
+*Offset  Size  Type         Description*
+     0     4  uint32_t     bitfield containing record information
+                              0-5  : Compression block size
+                              6-21 : Compression blocks count
+                              22   : Encrypted
+                              23-28: Compression method
+                              29   : Size 32-bit safe?
+                              30   : Uncompressed size 32-bit safe?
+                              31   : Offset 32-bit safe?
+_if offset 32 bit_
+     4     4  uint32_t     offset
+_else_
+     4     8  uint64_t     offset
+_end_
+_if uncompressed size 32 bit_
+     ?     4  uint32_t     uncompressed size
+_else_
+     ?     8  uint64_t     uncompressed size
+_end_
+_if compression method != 0x00_
+  _if size 32 bit_
+     ?     4  uint32_t     size
+  _else_
+     ?     4  uint32_t     size
+  _end_
+_end_
+_if compression block count > 0 && (encrypted || compression block count != 1)_
+  _for _ in 0..compression block count_
+     ?     4  uint32_t     block size
+  _end_
+_end_
+----
+
+=== Record
+NOTE: This structure, while still present in version >= 10 is not used anymore by default. See xref:encoded-record[Encoded Record] for the current record information.
+
+[subs="quotes"]
+----
+*Offset  Size  Type         Description*
+     0     8  uint64_t     offset
+     8     8  uint64_t     size (N)
+    16     8  uint64_t     uncompressed size
+    24     4  uint32_t     compression method:
+                              0x00 ... none
+                              0x01 ... zlib
+                              0x10 ... bias memory
+                              0x20 ... bias speed
+_if version <= 1_
+    28     8  uint64_t     timestamp
+_end_
+     ?    20  uint8_t[20]  data sha1 hash
+_if version >= 3_
+ _if compression_method != 0x00_
+  ?+20     4  uint32_t     block count (M)
+  ?+24  M*16  CB[M]        compression blocks
+ _end_
+     ?     1  uint8_t      is encrypted
+   ?+1     4  uint32_t     The uncompressed size of each compression block.
+_end_                        The last block can be smaller, of course.
+_if variant == "Conan Exiles"_
+     ?     4  uint32_t     Unknown field. For Conan Exiles index record only
+                           seen it to have the value 0.
+_end_
+----
+
+=== Compression Block (CB)
+[horizontal]
+Size:: 16 bytes
+
+[subs="quotes"]
+----
+*Offset  Size  Type         Description*
+     0     8  uint64_t     compressed data block start offset.
+                           version <= 4: offset is absolute to the file
+                           version 7: offset is relative to the offset
+                                      field in the corresponding Record
+     8     8  uint64_t     compressed data block end offset.
+                           There may or may not be a gap between blocks.
+                           version <= 4: offset is absolute to the file
+                           version 7: offset is relative to the offset
+                                      field in the corresponding Record
+----
+
+=== Data Record
+[subs="quotes"]
+----
+*Offset  Size  Type            Description*
+     0     ?  Record          file metadata (offset field is 0, N = compressed_size)
+_if variant == "Conan Exiles"_
+     ?    20  ?               Unknown. Maybe another SHA-1 sum of something?
+                              The first 4 bytes have values other than the extra
+                              4 bytes in the index record, which is why I didn't
+                              put those into the general record structure.
+_else if version >= 4 and compression_method != 0x00_
+     ?     4  uint32_t        Unknown.
+_end_
+     ?     N  uint8_t[N]      file data
+----
+
+[NOTE]
+====
+Starting with version 4 there is an additional 4 bytes in the repeated
+*data* record copy (the record that precedes the actual file date, not the
+record in the index). I don't know what that is. It is not always the same value.
+E.g. it is the same for some files, but different for others. The first 2 bytes
+seem to be always the same (`0x78 0x9c` in a v4 and a v7 pak that I saw), so maybe
+its 2 16 bit fields?
+
+This is why I've deactivated packing for versions > 3.
+====
+
+[[fdi]]
+=== Full Directory Index
+The data structure is a map<DirectoryName, map<FileName, offset>>.
+
+[subs="normal"]
+----
+*Offset  Size  Type            Description*
+     0     4  uint32_t        directory count (D)
+_for i in 0..D_
+     ?     4  int32_t         directory name size (DS)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+   ?+4    DS  char[DS]        directory name (includes terminating null byte)
+?+4+DS     4  uint32_t        file count (F)
+  _for j in 0..F_
+     ?     4  int32_t         file name size (FS)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+   ?+4    FS  char[FS]        file name (includes terminating null byte)
+?+4+FS     4  uint32_t        offset in xref:directory-info[encoded entry info]
+  _end_
+_end_
+----
+
+
+=== Index Record
+NOTE: This structure, while still present in version >= 10 is not used anymore by default. See xref:fdi[Full Directory Index] for record information.
+
+[subs="quotes"]
+----
+*Offset  Size  Type            Description*
+     0     4  int32_t         file name size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+     4     S  char[S]         file name (includes terminating null byte)
+   4+S     ?  Record          file metadata
+_if variant == "Conan Exiles"_
+     ?     4  ?               Unknown. Only saw all 0 so far.
+_end_
+----
+
+=== Index
+[subs="normal,callouts"]
+.Version >= 10
+----
+*Offset  Size  Type            Description*
+     0     4  int32_t         mount point size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+     4     S  char[S]         mount point (includes terminating null byte)
+   S+4     4  int32_t         entry count
+   S+8     8  uint64_t        path hash seed <1>
+  S+16     4  uint32_t        has path hash index
+_if has path index != 0_
+  S+20     8  int64_t         path hash index offset
+  S+28     8  int64_t         path hash index size
+  S+36    20  uint8_t[20]     path hash index hash
+_end_
+     ?     4  uint32_t        has full directory index
+_if has full directory index != 0_
+   ?+4     8  int64_t         full directory index offset
+  ?+12     8                  full directory index size
+  ?+20    20  uint8_t[20]     full directory index hash
+_end_
+     ?     4  int32_t         encoded entry info size (P)
+   ?+4     P  uint8_t[P]      encoded entry info [[directory-info]]
+   ?+P     4  uint32_t        file count, probably unused / 0 (N)
+ ?+P+4     ?  IndexRecord[N]  records
+----
+<1> Needs clarification
+
+[subs="quotes"]
+.Legacy (Version < 10)
+----
+*Offset  Size  Type            Description*
+     0     4  int32_t         mount point size (S)
+                              For some games a negative value means it's a UTF-16
+                              string in 2 * -S bytes.
+     4     S  char[S]         mount point (includes terminating null byte)
+   S+4     4  uint32_t        record count (N)
+   S+8     ?  IndexRecord[N]  records
+----
+
+=== Footer
+[horizontal]
+.Size and index features
+|====
+|Versions |Size |Index Encryption |Encryption Key Guid |Compression method name |Frozen Index
+|v1 - v3 |44 bytes |❌ |❌ |❌ |❌
+|v4 - v6 | 45 bytes |✔️ |❌ |❌ |❌
+|v7 | 65 bytes |✔️ |✔️ |❌ |❌
+|v8 | 193 bytes |✔️ |✔️ |✔️(Max. 4) |❌
+|v9 | 226 bytes |✔️ |✔️ |✔️(Max. 5) |✔️
+|v10 - v11 | 225 bytes |✔️ |✔️ |✔️(Max. 5) |❌
+|====
+
+[subs="quotes"]
+----
+*Offset  Size  Type         Description*
+_if version >= 7_
+     0    20  uint8_t[20]  encryption key Guid
+_end_
+_if version >= 4_
+     ?     1  uint8_t      encrypted index
+_end_
+     ?     4  uint32_t     magic: 0x5A6F12E1
+   ?+4     4  uint32_t     version: 1 - 11
+   ?+8     8  uint64_t     index offset
+  ?+16     8  uint64_t     index size
+  ?+24    20  uint8_t[20]  index sha1 hash
+_if version == 9_
+  ?+44     1  uint8_t      frozen index
+_end_
+_if version == 8_
+  ?+44   128  uint8_t[128] compression methods (4 * 32 chars)
+_else if version > 8_
+     ?   160  uint8_t[160] compression methods (5 * 32 chars)
+_end_
+----
+
+== Related Projects
+
+* https://github.com/panzi/fezpak[fezpak]: pack, unpack, list and mount FEZ .pak archives
+* https://github.com/panzi/psypkg[psypkg]: pack, unpack, list and mount Psychonauts .pkg archives
+* https://github.com/panzi/bgebf[bgebf]: unpack, list and mount Beyond Good and Evil .bf archives
+* https://github.com/panzi/unvpk[unvpk]: extract, list, check and mount Valve .vpk archives (C++)
+* https://github.com/panzi/rust-vpk[rust-vpk]: Rust rewrite of the above (Rust)
+* https://github.com/panzi/t2fbq[t2fbq]: unpack, list and mount Trine 2 .fbq archives
+* https://github.com/panzi/u4pak[u4pak]: old Python version of this program
+
+== GPLv3 License
+
+Rust U4Pak - pack, unpack, check, list and mount Unreal Engine 4 packages
+
+Copyright (C) {localyear} Mathias Panzenböck
+
+https://github.com/panzi/rust-u4pak[rust-u4pak] is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+rust-u4pak is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.

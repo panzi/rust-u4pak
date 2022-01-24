@@ -31,7 +31,7 @@ cargo build
     done
 } > "$release_dir/Help.txt"
 
-pandoc -f markdown -t html5 -o "$release_dir/README.html" README.md
+asciidoctor -o "$release_dir/README.html" README.adoc
 cp LICENSE.txt "$release_dir"
 
 for target in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu; do

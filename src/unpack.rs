@@ -13,14 +13,17 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fs::OpenOptions, io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
+use crate::decrypt::BLOCK_SIZE;
+use crate::util::align;
+use crate::decrypt::decrypt;
+use std::{fs::OpenOptions, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
 
-use crate::{Error, Result, io::transfer, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
+use crate::{Error, Result, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
 use crate::Record;
 use crate::Pak;
 use crate::Filter;
@@ -33,6 +36,7 @@ pub struct UnpackOptions<'a> {
     pub null_separated: bool,
     pub paths: Option<&'a [&'a str]>,
     pub thread_count: NonZeroUsize,
+    pub encryption_key: Option<Vec<u8>>,
 }
 
 impl Default for UnpackOptions<'_> {
@@ -43,6 +47,7 @@ impl Default for UnpackOptions<'_> {
             null_separated: false,
             paths: None,
             thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
+            encryption_key: None,
         }
     }
 }
@@ -77,7 +82,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 
             scope.spawn(move |_| {
                 let in_file = &mut in_file;
-                if let Err(error) = worker_proc(in_file, version, variant, work_receiver, result_sender) {
+                if let Err(error) = worker_proc(in_file, version, variant, options.encryption_key.clone(), work_receiver, result_sender) {
                     if !error.error_type().is_channel_disconnected() {
                         eprintln!("error in worker thread: {}", error);
                     }
@@ -151,28 +156,25 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, optio
 
     if let Some(paths) = options.paths {
         let mut filter: Filter = paths.into();
-        let records = pak.records().iter()
+        let records = pak.index().records().iter()
             .filter(|record| filter.visit(record.filename()));
 
         unpack_iter(pak, in_file, outdir, &options, records)?;
         filter.assert_all_visited()?;
     } else {
-        unpack_iter(pak, in_file, outdir, &options, pak.records().iter())?;
+        unpack_iter(pak, in_file, outdir, &options, pak.index().records().iter())?;
     }
     Ok(())
 }
 
-pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &mut File, outdir: impl AsRef<Path>) -> Result<PathBuf> {
-    if record.encrypted() {
-        return Err(Error::new("encryption is not supported".to_string())
-            .with_path(record.filename()));
-    }
-
+pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &mut File, outdir: impl AsRef<Path>, encryption_key: Option<Vec<u8>>) -> Result<PathBuf> {
+    let header_size = pak::Pak::header_size(version, variant, record);
+    
     let mut path = outdir.as_ref().to_path_buf();
     for component in parse_pak_path(record.filename()) {
         path.push(component);
     }
-
+    
     let mut out_file = match OpenOptions::new()
             .write(true)
             .create(true)
@@ -192,30 +194,47 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
             }
         }
     };
+    
+    in_file.seek(SeekFrom::Start(record.offset() + header_size))?;
+
+    // Encrypted files need to be read in 16 byte blocks
+    let buffer_length = if record.encrypted() {
+        align(record.size(), BLOCK_SIZE as u64)
+    } else {
+        record.size()
+    } as usize;
+
+    let mut in_buffer = vec![0u8; buffer_length];
+    in_file.read_exact(&mut in_buffer);
+    
+    if record.encrypted() {
+        if let Some(key) = encryption_key {
+            decrypt(&mut in_buffer, key);
+            // Trim padded bytes from undersized encryption blocks
+            in_buffer = in_buffer[..record.size() as usize].to_vec();
+        } else {
+            return Err(Error::new(
+                "File is encrypted, but no encryption key was provided".to_string(),
+            ).with_path(record.filename()));
+        }
+    }
 
     match record.compression_method() {
         pak::COMPR_NONE => {
-            in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, variant, record)))?;
-            transfer(in_file, &mut out_file, record.size() as usize)?;
+            out_file.write_all(&in_buffer);
             out_file.flush()?;
         }
         pak::COMPR_ZLIB => {
             if let Some(blocks) = record.compression_blocks() {
-                let base_offset = if version >= 7 { record.offset() } else { 0 };
-
-                let mut in_file = BufReader::new(in_file);
                 let mut out_file = BufWriter::new(out_file);
 
-                let mut in_buffer = Vec::new();
                 let mut out_buffer = Vec::with_capacity(record.compression_block_size() as usize);
 
                 for block in blocks {
-                    let block_size = block.end_offset - block.start_offset;
-                    in_buffer.resize(block_size as usize, 0);
-                    in_file.seek(SeekFrom::Start(base_offset + block.start_offset))?;
-                    in_file.read_exact(&mut in_buffer)?;
+                    let block_start = (block.start_offset - header_size) as usize;
+                    let block_end = (block.end_offset - header_size) as usize;
 
-                    let mut zlib = ZlibDecoder::new(&in_buffer[..]);
+                    let mut zlib = ZlibDecoder::new(&in_buffer[block_start..block_end]);
                     out_buffer.clear();
                     zlib.read_to_end(&mut out_buffer)?;
                     out_file.write_all(&out_buffer)?;
@@ -223,11 +242,7 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
                 out_file.flush()?;
             } else {
                 // version 2 has compression support, but not compression blocks
-                in_file.seek(SeekFrom::Start(record.offset() + pak::Pak::header_size(version, variant, record)))?;
-
-                let mut in_buffer = vec![0u8; record.size() as usize];
                 let mut out_buffer = Vec::new();
-                in_file.read_exact(&mut in_buffer)?;
 
                 let mut zlib = ZlibDecoder::new(&in_buffer[..]);
                 zlib.read_to_end(&mut out_buffer)?;
@@ -252,9 +267,9 @@ struct Work<'a> {
     outdir: &'a Path,
 }
 
-fn worker_proc(in_file: &mut File, version: u32, variant: Variant, work_channel: Receiver<Work>, result_channel: Sender<Result<PathBuf>>) -> Result<()> {
+fn worker_proc(in_file: &mut File, version: u32, variant: Variant, encryption_key: Option<Vec<u8>>, work_channel: Receiver<Work>, result_channel: Sender<Result<PathBuf>>) -> Result<()> {
     while let Ok(Work { record, outdir }) = work_channel.recv() {
-        let result = unpack_record(record, version, variant, in_file, outdir)
+        let result = unpack_record(record, version, variant, in_file, outdir, encryption_key.clone())
             .map_err(|error| error
                 .with_path_if_none(record.filename()));
 

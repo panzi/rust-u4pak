@@ -230,7 +230,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                     }
 
                     if let Some(blocks) = record.compression_blocks() {
-                        if !ignore_null_checksums || record.sha1() != &NULL_SHA1 {
+                        if !ignore_null_checksums || &record.sha1().unwrap_or([0u8; 20]) != &NULL_SHA1 {
                             let header_size = Pak::header_size(version, variant, record);
                             let mut hasher = OpenSSLSha1::new();
 
@@ -296,18 +296,18 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                             }
 
                             let actual_digest = hasher.finish();
-                            if &actual_digest != record.sha1() {
+                            if actual_digest != record.sha1().unwrap_or([0u8; 20]) {
                                 check_error!(ok, result_sender, abort_on_error, Error::new(format!(
                                     "checksum missmatch:\n\
                                     \texpected: {}\n\
                                     \tactual:   {}",
-                                    HexDisplay::new(record.sha1()),
+                                    HexDisplay::new(&record.sha1().unwrap_or([0u8; 20])),
                                     HexDisplay::new(&actual_digest)
                                 )).with_path(record.filename()));
                             }
                         }
                     } else if let Err(error) = check_data(&mut reader, record.filename(), offset,
-                            record.size(), record.sha1(), ignore_null_checksums, &mut buffer) {
+                            record.size(), &record.sha1().unwrap_or([0u8; 20]), ignore_null_checksums, &mut buffer) {
                         check_error!(ok, result_sender, abort_on_error, error);
                     }
 
@@ -322,13 +322,13 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
         drop(result_sender);
 
         if let Some(filter) = &mut filter {
-            let records = pak.records()
+            let records = pak.index().records()
                 .iter()
                 .filter(|&record| filter.visit(record.filename()));
 
             error_count += enqueue(records, work_sender, abort_on_error, null_separated)?;
         } else {
-            error_count += enqueue(pak.records().iter(), work_sender, abort_on_error, null_separated)?;
+            error_count += enqueue(pak.index().records().iter(), work_sender, abort_on_error, null_separated)?;
         }
 
         let linesep = if options.null_separated { '\0' } else { '\n' };

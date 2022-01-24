@@ -45,7 +45,7 @@ pub fn info(pak: &Pak, human_readable: bool) -> Result<()> {
     let mut sum_uncompr_unknown_size     = 0;
     let mut sum_uncompr_encrypted_size   = 0;
 
-    for record in pak.records() {
+    for record in pak.index().records() {
         sum_size += record.size();
         sum_uncompressed_size += record.uncompressed_size();
         if record.encrypted() {
@@ -82,14 +82,14 @@ pub fn info(pak: &Pak, human_readable: bool) -> Result<()> {
     }
 
     println!("Pak Version: {}", pak.version());
-    println!("Mount Point: {}", pak.mount_point().unwrap_or(""));
+    println!("Mount Point: {}", pak.index().mount_point().unwrap_or(""));
     println!();
 
     print_table(
         &["", "Count", "Size", "Uncompr."],
         &[Align::Left, Align::Right, Align::Right, Align::Right],
         &[
-            vec!["Files:",              &format!("{}", pak.records().len()), &fmt_size(sum_size),             &fmt_size(sum_uncompressed_size)],
+            vec!["Files:",              &format!("{}", pak.index().records().len()), &fmt_size(sum_size),             &fmt_size(sum_uncompressed_size)],
             vec!["Uncompr.:",           &format!("{}", uncompr_count),       &fmt_size(sum_uncompr_size),     ""],
             vec!["ZLIB Compr.:",        &format!("{}", zlib_count),          &fmt_size(sum_zlib_size),        &fmt_size(sum_uncompr_zlib_size)],
             vec!["Bias Speed Compr.:",  &format!("{}", bias_speed_count),    &fmt_size(sum_bias_speed_size),  &fmt_size(sum_uncompr_bias_speed_size)],

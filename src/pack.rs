@@ -21,7 +21,7 @@ use crossbeam_utils::thread;
 use openssl::sha::Sha1 as OpenSSLSha1;
 use flate2::{Compression, write::ZlibEncoder};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, Encoding, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
+use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, parse_compression_level, record::CompressionBlock, util::{parse_pak_path, parse_size}, walkdir::walkdir};
 use crate::Pak;
 use crate::result::Error;
 use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
@@ -29,6 +29,8 @@ use crate::record::Record;
 use crate::util::make_pak_path;
 use crate::encode;
 use crate::encode::Encode;
+use crate::index::Encoding;
+use crate::index::Index;
 
 pub const COMPR_DEFAULT: u32 = u32::MAX;
 
@@ -436,14 +438,20 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     );
     writer.flush()?;
 
+    let index = Index::new(
+        options
+            .mount_point
+            .map(str::to_string),
+        records,
+    );
+
     Ok(Pak::new(
         options.variant,
         options.version,
         index_offset,
         index_size,
         index_sha1,
-        options.mount_point.map(str::to_string),
-        records,
+        index,
     ))
 }
 
@@ -548,7 +556,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
         let mut in_file = match File::open(&file_path) {
             Ok(file) => file,
             Err(error) => {
-                result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                result_channel.send(Err(Error::io_with_path(error, file_path)))?;
                 break;
             }
         };
@@ -556,7 +564,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
         let metadata = match in_file.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
-                result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                result_channel.send(Err(Error::io_with_path(error, file_path)))?;
                 break;
             }
         };
@@ -567,7 +575,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             let created = match metadata.created() {
                 Ok(created) => created,
                 Err(error) => {
-                    result_channel.send( Err(Error::io_with_path(error, file_path)))?;
+                    result_channel.send(Err(Error::io_with_path(error, file_path)))?;
                     break;
                 }
             };
@@ -739,7 +747,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             uncompressed_size,
             compression_method,
             timestamp,
-            sha1,
+            Some(sha1),
             compression_blocks,
             false,
             compression_block_size,
