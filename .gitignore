@@ -2,6 +2,7 @@
 /tmp
 *.zip
 *.exe
+*.pak
 .*
 /perf.data
 /perf.data.old
@@ -9,3 +10,6 @@
 /release
 !.keep
 !.gitignore
+!.github
+!.gitmodules
+!.gitattributes
