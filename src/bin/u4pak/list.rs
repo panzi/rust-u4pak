@@ -17,11 +17,12 @@ use std::io::Write;
 
 use chrono::NaiveDateTime;
 
-use crate::{Filter, sort::{sort, Order}, util::print_headless_table};
-use crate::util::{format_size, print_table, Align::*};
-use crate::result::Result;
-use crate::record::Record;
-use crate::pak::{Pak, compression_method_name, HexDisplay};
+use u4pak::{Filter, util::print_headless_table};
+use u4pak::util::{format_size, print_table, Align::*};
+use u4pak::result::Result;
+use u4pak::record::Record;
+use u4pak::pak::{Pak, compression_method_name, HexDisplay};
+use crate::sort::{sort, Order};
 
 #[derive(Debug, PartialEq)]
 pub enum ListStyle {

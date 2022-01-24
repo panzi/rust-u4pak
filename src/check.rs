@@ -22,7 +22,6 @@ use openssl::sha::Sha1 as OpenSSLSha1;
 use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1, Variant}};
 use crate::reopen::Reopen;
 use crate::{Record, Result};
-//use crate::{decode, decode::Decode};
 
 pub const NULL_SHA1: Sha1 = [0u8; 20];
 

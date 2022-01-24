@@ -13,65 +13,41 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-u4pak.  If not, see <https://www.gnu.org/licenses/>.
 
-use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand, crate_version, crate_authors};
 use terminal_size::{terminal_size, Width};
 
-use pak::{COMPR_NONE, Variant};
-use std::{convert::TryInto, io::stderr, num::{NonZeroU32, NonZeroUsize}};
-use std::io::BufReader;
-use std::fs::File;
 use env_logger::Env;
+use std::fs::File;
+use std::io::BufReader;
+use std::{
+    convert::TryInto,
+    io::stderr,
+    num::{NonZeroU32, NonZeroUsize},
+};
 
-#[cfg(target_family="windows")]
+#[cfg(target_family = "windows")]
 use std::convert::TryFrom;
 
-pub mod pak;
-pub use pak::{Pak, Options, COMPR_ZLIB};
-
-pub mod decrypt;
-pub mod index;
-
-pub mod result;
-pub use result::{Error, Result};
+use u4pak::check::{check, CheckOptions};
+use u4pak::info::info;
+use u4pak::pack::{pack, PackOptions, PackPath};
+use u4pak::pak::{Options, COMPR_NONE, COMPR_ZLIB};
+use u4pak::unpack::{unpack, UnpackOptions};
+use u4pak::util::{parse_compression_level, parse_size};
+use u4pak::{Error, Pak, Result, Variant};
 
 pub mod sort;
-pub use sort::{DEFAULT_ORDER, SortKey, parse_order};
+use sort::parse_order;
 
-pub mod record;
-pub use record::Record;
+mod list;
+use list::{list, ListOptions, ListStyle};
 
-pub mod info;
-pub use info::info;
-
-pub mod list;
-pub use list::{list, ListOptions, ListStyle};
-
-pub mod util;
-pub use util::parse_size;
-
-pub mod decode;
-pub mod encode;
-
-pub mod filter;
-pub use filter::Filter;
-
-pub mod unpack;
-pub use unpack::{unpack, UnpackOptions};
-
-pub mod pack;
-pub use pack::{pack, PackOptions, PackPath};
-
-pub mod check;
-pub use check::{check, CheckOptions};
-
-pub mod walkdir;
-pub mod io;
-pub mod reopen;
 pub mod args;
+pub mod io;
 
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 pub mod mount;
-#[cfg(target_os="linux")]
+#[cfg(target_os = "linux")]
 pub use mount::{mount, MountOptions};
 
 fn get_paths<'a>(args: &'a clap::ArgMatches) -> Result<Option<Vec<&'a str>>> {
@@ -120,32 +96,10 @@ pub fn parse_compression_method(value: &str) -> Result<u32> {
     } else if value.eq_ignore_ascii_case("zlib") {
         Ok(COMPR_ZLIB)
     } else {
-        Err(Error::new(format!("compression method not supported: {:?}", value)))
-    }
-}
-
-pub const COMPR_LEVEL_FAST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
-pub const COMPR_LEVEL_DEFAULT: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
-pub const COMPR_LEVEL_BEST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(9) };
-
-pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
-    if value.eq_ignore_ascii_case("best") {
-        Ok(COMPR_LEVEL_BEST)
-    } else if value.eq_ignore_ascii_case("fast") {
-        Ok(COMPR_LEVEL_FAST)
-    } else if value.eq_ignore_ascii_case("default") {
-        Ok(COMPR_LEVEL_DEFAULT)
-    } else {
-        match value.parse() {
-            Ok(level) if level > 0 && level < 10 => {
-                Ok(NonZeroU32::new(level).unwrap())
-            }
-            _ => {
-                return Err(Error::new(format!(
-                    "illegal compression level: {:?}",
-                    value)));
-            }
-        }
+        Err(Error::new(format!(
+            "compression method not supported: {:?}",
+            value
+        )))
     }
 }
 
@@ -216,7 +170,8 @@ fn arg_threads<'a, 'b>() -> Arg<'a, 'b> {
         .value_name("COUNT")
         .help(
             "Number of threads to use for the operation. \
-            'auto' means use the number of logical cores on your computer.")
+            'auto' means use the number of logical cores on your computer.",
+        )
 }
 
 fn arg_force_version<'a, 'b>() -> Arg<'a, 'b> {
@@ -243,7 +198,8 @@ fn arg_print0<'a, 'b>() -> Arg<'a, 'b> {
             "Separate file names with NULL bytes. \
             This is useful for use with xargs --null, to be sure that \
             possible new lines in file names aren't interpreted as \
-            file name separators.")
+            file name separators.",
+        )
 }
 
 fn arg_encryption_key<'a, 'b>() -> Arg<'a, 'b> {
@@ -255,7 +211,7 @@ fn arg_encryption_key<'a, 'b>() -> Arg<'a, 'b> {
         .help("Base64 encoded 16 byte AES encryption key")
 }
 
-#[cfg(target_family="windows")]
+#[cfg(target_family = "windows")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Pause {
     Always,
@@ -263,14 +219,14 @@ pub enum Pause {
     Auto,
 }
 
-#[cfg(target_family="windows")]
+#[cfg(target_family = "windows")]
 impl Default for Pause {
     fn default() -> Self {
         Self::Auto
     }
 }
 
-#[cfg(target_family="windows")]
+#[cfg(target_family = "windows")]
 impl TryFrom<&str> for Pause {
     type Error = crate::Error;
 
@@ -284,7 +240,10 @@ impl TryFrom<&str> for Pause {
         } else if trim_value.eq_ignore_ascii_case("always") {
             Ok(Pause::Always)
         } else {
-            Err(Error::new(format!("illegal value for --pause: {:?}", value)))
+            Err(Error::new(format!(
+                "illegal value for --pause: {:?}",
+                value
+            )))
         }
     }
 }
@@ -303,18 +262,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
         .about("\n\
                 This is a tool to pack, unpack, check, and list the contents of Unreal Engine 4 packages. \
                 Note that only a limited number of pak versions are supported, depending on the kinds of \
-                paks I have seen.For reading that is version 1, 2, 3, 4, 7, for writing it is 1, 2, 3.\n\
-                \n\
-                Encryption is not supported. I haven't seen a pak file that uses encryption and I have \
-                no clue how it would work (e.g. what is the algorithm or where to get the encrytion key \
-                from).\n\
-                \n\
-                Note that sometimes some parts of pak files are zeroed out by games. In that case \
-                sometimes the options --ignore-magic and --force-version=3 (or maybe another version) \
-                may help, but usually too much of the file is zeroed out and nothing can be read. \
-                In particular I've seen the whole footer to be zeroed out (contains the offset of the \
-                file index). My guess would be that this information is compiled into the game binary \
-                somehow, but I have no idea how one would access that.\n\
+                paks I have seen.For reading that is version 1-11, for writing it is 1, 2, 3.\n\
                 \n\
                 Instead of passing arguments you can also put the arguments in a file with the extension \
                 .u4pak and pass the path to that instead. This is useful for Windows users that aren't \
@@ -340,23 +288,24 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 If u4pak.exe is run by double clicking or by dropping a .u4pak file on it it won't \
                 immediately close the terminal window, but will instead ask you to press ENTER. It does \
                 this so you have a chance to read the output. Since I don't use Windows (I cross compile \
-                on Linux and test with Wine) I could not test this particular feature. It it doesn't work \
+                on Linux and test with Wine) I could not test this particular feature. If it doesn't work \
                 please report a bug. In order to force the \"Press ENTER to continue...\" message you can \
                 pass the argument --pause-on-exit=always (Windows-only).\n\
                 \n\
                 Homepage: https://github.com/panzi/rust-u4pak\n\
                 Report issues to: https://github.com/panzi/rust-u4pak/issues")
-        .version("1.3.0")
+        .version(crate_version!())
         .global_setting(AppSettings::VersionlessSubcommands)
-        .author("Mathias Panzenböck <grosser.meister.morti@gmx.net>");
+        .author(crate_authors!());
 
-    #[cfg(target_family="windows")]
-    let app = app
-        .arg(Arg::with_name("pause-on-exit")
+    #[cfg(target_family = "windows")]
+    let app = app.arg(
+        Arg::with_name("pause-on-exit")
             .long("pause-on-exit")
             .default_value("auto")
             .takes_value(true)
-            .help("Wait for user to press ENTER on exit. Possible values: always, never, auto."));
+            .help("Wait for user to press ENTER on exit. Possible values: always, never, auto."),
+    );
 
     let app = app
         .subcommand(SubCommand::with_name("info")
@@ -543,28 +492,36 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                     ")));
 
     #[cfg(target_os = "linux")]
-    let app = app.subcommand(SubCommand::with_name("mount")
-        .alias("m")
-        .about("Mount package as read-only filesystem")
-        .arg(arg_variant())
-        .arg(arg_ignore_magic())
-        .arg(arg_encoding())
-        .arg(arg_force_version())
-        .arg(Arg::with_name("foregound")
-            .long("foreground")
-            .short("f")
-            .takes_value(false)
-            .help("Keep process in foreground."))
-        .arg(Arg::with_name("debug")
-            .long("debug")
-            .short("g")
-            .takes_value(false)
-            .help("Debug mode. Implies --foreground."))
-        .arg(arg_package())
-        .arg(Arg::with_name("mountpt")
-            .index(2)
-            .required(true)
-            .value_name("MOUNTPT")));
+    let app = app.subcommand(
+        SubCommand::with_name("mount")
+            .alias("m")
+            .about("Mount package as read-only filesystem")
+            .arg(arg_variant())
+            .arg(arg_ignore_magic())
+            .arg(arg_encoding())
+            .arg(arg_force_version())
+            .arg(
+                Arg::with_name("foregound")
+                    .long("foreground")
+                    .short("f")
+                    .takes_value(false)
+                    .help("Keep process in foreground."),
+            )
+            .arg(
+                Arg::with_name("debug")
+                    .long("debug")
+                    .short("g")
+                    .takes_value(false)
+                    .help("Debug mode. Implies --foreground."),
+            )
+            .arg(arg_package())
+            .arg(
+                Arg::with_name("mountpt")
+                    .index(2)
+                    .required(true)
+                    .value_name("MOUNTPT"),
+            ),
+    );
 
     app
 }
@@ -575,7 +532,10 @@ fn main() {
         Ok(args_from_file) => args_from_file,
         Err(error) => {
             let _ = error.write_to(&mut stderr(), false);
-            #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+            #[cfg(target_family = "windows")]
+            {
+                windows::pause_if_owns_terminal();
+            }
             return;
         }
     };
@@ -591,17 +551,23 @@ fn main() {
         Err(error) => {
             if error.use_stderr() {
                 eprintln!("{}", error);
-                #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+                #[cfg(target_family = "windows")]
+                {
+                    windows::pause_if_owns_terminal();
+                }
                 std::process::exit(1);
             } else {
                 println!("{}", error);
-                #[cfg(target_family="windows")] { windows::pause_if_owns_terminal(); }
+                #[cfg(target_family = "windows")]
+                {
+                    windows::pause_if_owns_terminal();
+                }
                 return;
             }
         }
     };
 
-    #[cfg(target_family="windows")]
+    #[cfg(target_family = "windows")]
     let pause: Pause = match matches.value_of("pause-on-exit").unwrap().try_into() {
         Ok(pause) => pause,
         Err(error) => {
@@ -615,11 +581,11 @@ fn main() {
         let _ = error.write_to(&mut stderr(), false);
     }
 
-    #[cfg(target_family="windows")]
+    #[cfg(target_family = "windows")]
     match pause {
         Pause::Always => windows::pause(),
-        Pause::Never  => {},
-        Pause::Auto   => windows::pause_if_owns_terminal(),
+        Pause::Never => {}
+        Pause::Auto => windows::pause_if_owns_terminal(),
     }
 }
 
@@ -628,7 +594,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
         ("info", Some(args)) => {
             let variant = args.value_of("variant").unwrap().try_into()?;
             let human_readable = args.is_present("human-readable");
-            let ignore_magic   = args.is_present("ignore-magic");
+            let ignore_magic = args.is_present("ignore-magic");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
 
@@ -640,20 +606,26 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
-                        .expect("Failed to parse encryption key."),
+                    base64::decode(
+                        key.parse::<String>()
+                            .expect("Failed to read encryption key."),
+                    )
+                    .expect("Failed to parse encryption key."),
                 )
             } else {
                 None
             };
 
-            let pak = Pak::from_path(&path, Options {
-                variant,
-                ignore_magic,
-                encoding,
-                force_version,
-                encryption_key
-            })?;
+            let pak = Pak::from_path(
+                &path,
+                Options {
+                    variant,
+                    ignore_magic,
+                    encoding,
+                    force_version,
+                    encryption_key,
+                },
+            )?;
 
             info(&pak, human_readable)?;
         }
@@ -668,9 +640,9 @@ fn run(matches: &ArgMatches) -> Result<()> {
             let variant = args.value_of("variant").unwrap().try_into()?;
             let human_readable = args.is_present("human-readable");
             let null_separated = args.is_present("print0");
-            let only_names     = args.is_present("only-names");
-            let ignore_magic   = args.is_present("ignore-magic");
-            let no_header      = args.is_present("no-header");
+            let only_names = args.is_present("only-names");
+            let ignore_magic = args.is_present("ignore-magic");
+            let no_header = args.is_present("no-header");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
             let paths = get_paths(args)?;
@@ -688,8 +660,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
-                        .expect("Failed to parse encryption key."),
+                    base64::decode(
+                        key.parse::<String>()
+                            .expect("Failed to read encryption key."),
+                    )
+                    .expect("Failed to parse encryption key."),
                 )
             } else {
                 None
@@ -697,36 +672,45 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, path))
+                Err(error) => return Err(Error::io_with_path(error, path)),
             };
             let mut reader = BufReader::new(&mut file);
 
-            let pak = Pak::from_reader(&mut reader, Options {
-                variant,
-                ignore_magic,
-                encoding,
-                force_version,
-                encryption_key
-            })?;
+            let pak = Pak::from_reader(
+                &mut reader,
+                Options {
+                    variant,
+                    ignore_magic,
+                    encoding,
+                    force_version,
+                    encryption_key,
+                },
+            )?;
 
             drop(reader);
 
-            list(pak, ListOptions {
-                order,
-                style: if only_names {
-                    ListStyle::OnlyNames { null_separated }
-                } else {
-                    ListStyle::Table { human_readable, no_header }
+            list(
+                pak,
+                ListOptions {
+                    order,
+                    style: if only_names {
+                        ListStyle::OnlyNames { null_separated }
+                    } else {
+                        ListStyle::Table {
+                            human_readable,
+                            no_header,
+                        }
+                    },
+                    paths,
                 },
-                paths,
-            })?;
+            )?;
         }
         ("check", Some(args)) => {
-            let null_separated        = args.is_present("print0");
-            let ignore_magic          = args.is_present("ignore-magic");
+            let null_separated = args.is_present("print0");
+            let ignore_magic = args.is_present("ignore-magic");
             let ignore_null_checksums = args.is_present("ignore-null-checksums");
-            let abort_on_error        = args.is_present("abort-on-error");
-            let verbose               = args.is_present("verbose");
+            let abort_on_error = args.is_present("abort-on-error");
+            let verbose = args.is_present("verbose");
             let variant = args.value_of("variant").unwrap().try_into()?;
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let path = args.value_of("package").unwrap();
@@ -745,8 +729,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
-                        .expect("Failed to parse encryption key."),
+                    base64::decode(
+                        key.parse::<String>()
+                            .expect("Failed to read encryption key."),
+                    )
+                    .expect("Failed to parse encryption key."),
                 )
             } else {
                 None
@@ -754,17 +741,20 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, path))
+                Err(error) => return Err(Error::io_with_path(error, path)),
             };
             let mut reader = BufReader::new(&mut file);
 
-            let pak = Pak::from_reader(&mut reader, Options {
-                variant,
-                ignore_magic,
-                encoding,
-                force_version,
-                encryption_key
-            })?;
+            let pak = Pak::from_reader(
+                &mut reader,
+                Options {
+                    variant,
+                    ignore_magic,
+                    encoding,
+                    force_version,
+                    encryption_key,
+                },
+            )?;
 
             let options = CheckOptions {
                 variant,
@@ -789,9 +779,9 @@ fn run(matches: &ArgMatches) -> Result<()> {
         ("unpack", Some(args)) => {
             let variant = args.value_of("variant").unwrap().try_into()?;
             let outdir = args.value_of("outdir").unwrap();
-            let null_separated           = args.is_present("print0");
-            let verbose                  = args.is_present("verbose");
-            let ignore_magic             = args.is_present("ignore-magic");
+            let null_separated = args.is_present("print0");
+            let verbose = args.is_present("verbose");
+            let ignore_magic = args.is_present("ignore-magic");
             let dirname_from_compression = args.is_present("dirname-from-compression");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let thread_count = get_threads(args)?;
@@ -811,8 +801,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let encryption_key = if let Some(key) = args.value_of("encryption-key") {
                 Some(
-                    base64::decode(key.parse::<String>().expect("Failed to read encryption key."))
-                        .expect("Failed to parse encryption key."),
+                    base64::decode(
+                        key.parse::<String>()
+                            .expect("Failed to read encryption key."),
+                    )
+                    .expect("Failed to parse encryption key."),
                 )
             } else {
                 None
@@ -820,34 +813,42 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, path))
+                Err(error) => return Err(Error::io_with_path(error, path)),
             };
             let mut reader = BufReader::new(&mut file);
 
-            let pak = Pak::from_reader(&mut reader, Options {
-                variant,
-                ignore_magic,
-                encoding,
-                force_version,
-                encryption_key: encryption_key.clone()
-            })?;
+            let pak = Pak::from_reader(
+                &mut reader,
+                Options {
+                    variant,
+                    ignore_magic,
+                    encoding,
+                    force_version,
+                    encryption_key: encryption_key.clone(),
+                },
+            )?;
 
             drop(reader);
 
-            unpack(&pak, &mut file, outdir, UnpackOptions {
-                dirname_from_compression,
-                verbose,
-                null_separated,
-                paths,
-                thread_count,
-                encryption_key
-            })?;
+            unpack(
+                &pak,
+                &mut file,
+                outdir,
+                UnpackOptions {
+                    dirname_from_compression,
+                    verbose,
+                    null_separated,
+                    paths,
+                    thread_count,
+                    encryption_key,
+                },
+            )?;
         }
         ("pack", Some(args)) => {
             let variant = args.value_of("variant").unwrap().try_into()?;
             let thread_count = get_threads(args)?;
             let null_separated = args.is_present("print0");
-            let verbose        = args.is_present("verbose");
+            let verbose = args.is_present("verbose");
             let mount_point = args.value_of("mount-point");
             let encoding = args.value_of("encoding").unwrap().try_into()?;
             let version = if let Some(version) = args.value_of("version") {
@@ -858,17 +859,26 @@ fn run(matches: &ArgMatches) -> Result<()> {
                     Variant::ConanExiles => 4,
                 }
             };
-            let compression_block_size = parse_size(args.value_of("compression-block-size").unwrap())?;
+            let compression_block_size =
+                parse_size(args.value_of("compression-block-size").unwrap())?;
             if compression_block_size > u32::MAX as usize {
-                return Err(Error::new(format!("--compression-block-size too big: {}", compression_block_size)));
+                return Err(Error::new(format!(
+                    "--compression-block-size too big: {}",
+                    compression_block_size
+                )));
             }
-            let compression_block_size = if let Some(value) = NonZeroU32::new(compression_block_size as u32) {
-                value
-            } else {
-                return Err(Error::new("--compression-block-size cannot be 0".to_string()));
-            };
-            let compression_method = parse_compression_method(args.value_of("compression-method").unwrap())?;
-            let compression_level = parse_compression_level(args.value_of("compression-level").unwrap())?;
+            let compression_block_size =
+                if let Some(value) = NonZeroU32::new(compression_block_size as u32) {
+                    value
+                } else {
+                    return Err(Error::new(
+                        "--compression-block-size cannot be 0".to_string(),
+                    ));
+                };
+            let compression_method =
+                parse_compression_method(args.value_of("compression-method").unwrap())?;
+            let compression_level =
+                parse_compression_level(args.value_of("compression-level").unwrap())?;
             let path = args.value_of("package").unwrap();
             let paths = if let Some(path_strs) = args.values_of("paths") {
                 let mut paths = Vec::<PackPath>::new();
@@ -882,23 +892,27 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 return Err(Error::new("missing argument: PATH".to_string()));
             };
 
-            pack(path, &paths, PackOptions {
-                variant,
-                version,
-                mount_point,
-                compression_method,
-                compression_block_size,
-                compression_level,
-                encoding,
-                verbose,
-                null_separated,
-                thread_count,
-            })?;
+            pack(
+                path,
+                &paths,
+                PackOptions {
+                    variant,
+                    version,
+                    mount_point,
+                    compression_method,
+                    compression_block_size,
+                    compression_level,
+                    encoding,
+                    verbose,
+                    null_separated,
+                    thread_count,
+                },
+            )?;
         }
         #[cfg(target_os = "linux")]
         ("mount", Some(args)) => {
-            let foreground   = args.is_present("foreground");
-            let debug        = args.is_present("debug");
+            let foreground = args.is_present("foreground");
+            let debug = args.is_present("debug");
             let ignore_magic = args.is_present("ignore-magic");
             let variant = args.value_of("variant").unwrap().try_into()?;
             let encoding = args.value_of("encoding").unwrap().try_into()?;
@@ -913,23 +927,24 @@ fn run(matches: &ArgMatches) -> Result<()> {
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
-                Err(error) => return Err(Error::io_with_path(error, path))
+                Err(error) => return Err(Error::io_with_path(error, path)),
             };
             let mut reader = BufReader::new(&mut file);
 
-            let pak = Pak::from_reader(&mut reader, Options {
-                variant,
-                ignore_magic,
-                encoding,
-                force_version,
-            })?;
+            let pak = Pak::from_reader(
+                &mut reader,
+                Options {
+                    variant,
+                    ignore_magic,
+                    encoding,
+                    force_version,
+                },
+            )?;
 
             drop(reader);
 
-            mount(pak, file, mountpt, MountOptions {
-                foreground,
-                debug,
-            }).map_err(|error| error.with_path_if_none(path))?;
+            mount(pak, file, mountpt, MountOptions { foreground, debug })
+                .map_err(|error| error.with_path_if_none(path))?;
         }
         ("", _) => {
             let mut buf = Vec::new();
@@ -939,7 +954,8 @@ fn run(matches: &ArgMatches) -> Result<()> {
             return Err(Error::new(format!(
                 "Error: Missing sub-command!\n\
                  \n\
-                 {}", message
+                 {}",
+                message
             )));
         }
         (cmd, _) => {
@@ -951,7 +967,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 "Error: Unknown subcommand: {}\n\
                  \n\
                  {}",
-                 cmd, message
+                cmd, message
             )));
         }
     }
@@ -962,7 +978,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
 #[allow(unused)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
-#[cfg(target_family="windows")]
+#[cfg(target_family = "windows")]
 mod windows {
     use std::io::Read;
 
@@ -970,7 +986,10 @@ mod windows {
 
     #[link(name = "user32")]
     extern "stdcall" {
-        pub(crate) fn GetConsoleProcessList(lpdwProcessList: *mut DWORD, dwProcessCount: DWORD) -> DWORD;
+        pub(crate) fn GetConsoleProcessList(
+            lpdwProcessList: *mut DWORD,
+            dwProcessCount: DWORD,
+        ) -> DWORD;
     }
 
     pub fn pause() {
@@ -981,7 +1000,12 @@ mod windows {
 
     pub fn pause_if_owns_terminal() {
         let mut process_list = [0, 0];
-        let count = unsafe { GetConsoleProcessList(process_list.as_mut_ptr() as *mut DWORD, process_list.len() as DWORD) };
+        let count = unsafe {
+            GetConsoleProcessList(
+                process_list.as_mut_ptr() as *mut DWORD,
+                process_list.len() as DWORD,
+            )
+        };
 
         if count == 1 {
             pause();
