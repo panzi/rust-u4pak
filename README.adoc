@@ -6,6 +6,10 @@ v1.4.0
 :toc: left
 :toclevels: 3
 
+image:https://img.shields.io/github/workflow/status/panzi/rust-u4pak/Rust["Build status", link=https://github.com/panzi/rust-u4pak/actions/workflows/rust.yml]
+image:https://img.shields.io/github/v/release/panzi/rust-u4pak["Release",link="https://github.com/panzi/rust-u4pak/releases"]
+image:https://img.shields.io/github/license/panzi/rust-u4pak["License",link="https://github.com/panzi/rust-u4pak/blob/main/LICENSE.txt"]
+
 More or less re-implementation of https://github.com/panzi/u4pak[Python U4Pak]
 for fun, ease of use (standalone binary), and speed (multi-threading).
 
