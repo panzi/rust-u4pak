@@ -20,6 +20,8 @@ jobs:
       run: git submodule update --init
     - name: Fuse dependency
       run: sudo apt-get install -y libfuse-dev pkg-config
+    - name: Download pak files
+      run: cd pak-examples & ./download.sh
     - name: Build
       run: cargo build --verbose
     - name: Run tests
