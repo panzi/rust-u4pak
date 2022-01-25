@@ -39,6 +39,8 @@ jobs:
         chmod u+x download.sh
         ./download.sh
 
+    - uses: Swatinem/rust-cache@v1
+
     - name: Build
       run: cargo build --verbose
 
