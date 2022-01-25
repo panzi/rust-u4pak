@@ -78,11 +78,15 @@ the "Press ENTER to continue..." message you can pass the argument
 
 == Usage
 
-`u4pak [--pause-on-exit=<always|never|auto>] [SUBCOMMAND]`
+```
+u4pak [--pause-on-exit=<always|never|auto>] [SUBCOMMAND]
+```
 
 Or:
 
-`u4pak "C:\Path\to\arguments.u4pak"`
+```
+u4pak "C:\Path\to\arguments.u4pak"
+```
 
 == Sub-Commands
 
