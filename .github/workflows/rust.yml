@@ -18,11 +18,29 @@ jobs:
     - uses: actions/checkout@v2
     - name: Fetch example pak files from submodule
       run: git submodule update --init
+
     - name: Fuse dependency
       run: sudo apt-get install -y libfuse-dev pkg-config
+
+    - name: Cache pak files
+      id: cache-pak
+      uses: actions/cache@v2
+      with:
+        path: |
+          pak-examples/pak
+        key: ${{ runner.os }}-pak-${{ hashFiles('pak-examples/download.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-pak-
+
     - name: Download pak files
-      run: cd pak-examples && chmod u+x download.sh && ./download.sh
+      if: steps.cache-pak.outputs.cache-hit != 'true'
+      run: |
+        cd pak-examples
+        chmod u+x download.sh
+        ./download.sh
+
     - name: Build
       run: cargo build --verbose
+
     - name: Run tests
       run: cargo test --verbose
