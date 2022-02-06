@@ -19,6 +19,7 @@ use crate::Record;
 use crate::Pak;
 use crate::Filter;
 use crate::reopen::Reopen;
+use log::{debug};
 
 #[derive(Debug)]
 pub struct UnpackOptions<'a> {
@@ -196,23 +197,14 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
     } as usize;
 
     let mut in_buffer = vec![0u8; buffer_length];
-    in_file.read_exact(&mut in_buffer);
+    in_file.read_exact(&mut in_buffer)?;
     
-    if record.encrypted() {
-        if let Some(key) = encryption_key {
-            decrypt(&mut in_buffer, key);
-            // Trim padded bytes from undersized encryption blocks
-            in_buffer = in_buffer[..record.size() as usize].to_vec();
-        } else {
-            return Err(Error::new(
-                "File is encrypted, but no encryption key was provided".to_string(),
-            ).with_path(record.filename()));
-        }
-    }
+    decrypt_entry(&mut in_buffer, record, encryption_key, record.size() as usize)?;
+    debug!("unpacking {:?}", record);
 
     match record.compression_method() {
         pak::COMPR_NONE => {
-            out_file.write_all(&in_buffer);
+            out_file.write_all(&in_buffer)?;
             out_file.flush()?;
         }
         pak::COMPR_ZLIB => {
@@ -267,5 +259,20 @@ fn worker_proc(in_file: &mut File, version: u32, variant: Variant, encryption_ke
         result_channel.send(result)?;
     }
 
+    Ok(())
+}
+
+fn decrypt_entry(buffer: &mut Vec<u8>, record: &Record, encryption_key: Option<Vec<u8>>, size: usize) -> Result<()> {
+    if record.encrypted() {
+        if let Some(key) = encryption_key {
+            decrypt(buffer, key);
+            // Trim padded bytes from undersized encryption blocks
+            *buffer = buffer[..size].to_vec();
+        } else {
+            return Err(Error::new(
+                "File is encrypted, but no encryption key was provided".to_string(),
+            ).with_path(record.filename()));
+        }
+    }
     Ok(())
 }

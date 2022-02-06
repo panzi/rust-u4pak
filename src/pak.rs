@@ -298,7 +298,7 @@ impl Pak {
 
                     if let Some(blocks) = &record.compression_blocks() {
                         size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
-                        if version >= 8 {
+                        if version >= 5 {
                             size += 4;
                         }
                     }

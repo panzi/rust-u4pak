@@ -52,7 +52,6 @@ fn test_v5_encindex() -> Result<()> {
 }
 
 #[test]
-#[ignore]
 fn test_v5_compressed() -> Result<()> {
     let out_dir = "./v5_compressed-it";
     remove_dir_all(out_dir);
@@ -65,7 +64,6 @@ fn test_v5_compressed() -> Result<()> {
 }
 
 #[test]
-#[ignore]
 fn test_v5_compressed_encrypted() -> Result<()> {
     let out_dir = "./v5_compressed_encrypted-it";
     remove_dir_all(out_dir);
@@ -78,7 +76,6 @@ fn test_v5_compressed_encrypted() -> Result<()> {
 }
 
 #[test]
-#[ignore]
 fn test_v5_compressed_encrypted_encindex() -> Result<()> {
     let out_dir = "./v5_compressed_encrypted_encindex-it";
     remove_dir_all(out_dir);
@@ -91,7 +88,6 @@ fn test_v5_compressed_encrypted_encindex() -> Result<()> {
 }
 
 #[test]
-#[ignore]
 fn test_v5_compressed_encindex() -> Result<()> {
     let out_dir = "./v5_compressed_encindex-it";
     remove_dir_all(out_dir);
