@@ -267,7 +267,7 @@ fn decrypt_entry(buffer: &mut Vec<u8>, record: &Record, encryption_key: Option<V
         if let Some(key) = encryption_key {
             decrypt(buffer, key);
             // Trim padded bytes from undersized encryption blocks
-            *buffer = buffer[..size].to_vec();
+            buffer.truncate(size);
         } else {
             return Err(Error::new(
                 "File is encrypted, but no encryption key was provided".to_string(),
