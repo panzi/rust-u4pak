@@ -28,7 +28,7 @@ jobs:
       with:
         path: |
           pak-examples/pak
-        key: ${{ runner.os }}-pak-${{ hashFiles('pak-examples/download.sh') }}
+        key: ${{ runner.os }}-pak-${{ hashFiles('pak-examples/build/download/*') }}
         restore-keys: |
           ${{ runner.os }}-pak-
 
