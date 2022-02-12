@@ -13,7 +13,7 @@ use std::io::BufReader;
 use std::{
     convert::TryInto,
     io::stderr,
-    num::{NonZeroU32, NonZeroUsize},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
 };
 
 #[cfg(target_family = "windows")]
@@ -238,6 +238,7 @@ impl TryFrom<&str> for Pause {
 }
 
 const DEFAULT_BLOCK_SIZE_STR: &str = "65536";
+const DEFAULT_MIN_COMPRESSION_SIZE_STR: &str = "100";
 
 fn make_app<'a, 'b>() -> App<'a, 'b> {
     let width = if let Some((Width(width), _)) = terminal_size() {
@@ -420,10 +421,7 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .short("c")
                 .takes_value(true)
                 .default_value("none")
-                .help(
-                    "Default compression method. Note that files <= 100 bytes are never \
-                    compressed because the compression overhead would make them actually \
-                    bigger. Maybe this limit might be even raised."))
+                .help("Default compression method. See also: --compression-min-size"))
             .arg(Arg::with_name("compression-block-size")
                 .long("compression-block-size")
                 .short("b")
@@ -438,6 +436,15 @@ fn make_app<'a, 'b>() -> App<'a, 'b> {
                 .help(
                     "Default compression level. Allowed values are the integers from 1 to 9, \
                     or the strings 'fast' (=1), 'best' (=9), and 'default' (=6)."))
+            .arg(Arg::with_name("compression-min-size")
+                .long("compression-min-size")
+                .short("s")
+                .takes_value(true)
+                .default_value(DEFAULT_MIN_COMPRESSION_SIZE_STR)
+                .help(
+                    "Minimum size of files to be compressed. Note that it makes no sense to \
+                    try to compress files smaller than 100 bytes or so, because of the \
+                    compression overhead."))
             .arg(arg_encoding())
             .arg(arg_print0())
             .arg(arg_threads())
@@ -865,6 +872,23 @@ fn run(matches: &ArgMatches) -> Result<()> {
                         "--compression-block-size cannot be 0".to_string(),
                     ));
                 };
+            let compression_min_size =
+                parse_size(args.value_of("compression-min-size").unwrap())?;
+            if compression_min_size > u64::MAX as usize {
+                return Err(Error::new(format!(
+                    "--compression-min-size too big: {}",
+                    compression_block_size
+                )));
+            }
+            let compression_min_size =
+                if let Some(value) = NonZeroU64::new(compression_min_size as u64) {
+                    value
+                } else {
+                    return Err(Error::new(format!(
+                        "--compression-min-size cannot be 0: {}",
+                        compression_min_size
+                    )));
+                };
             let compression_method =
                 parse_compression_method(args.value_of("compression-method").unwrap())?;
             let compression_level =
@@ -891,6 +915,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                     mount_point,
                     compression_method,
                     compression_block_size,
+                    compression_min_size,
                     compression_level,
                     encoding,
                     verbose,

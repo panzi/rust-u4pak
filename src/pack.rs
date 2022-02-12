@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashMap, convert::TryFrom, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize}, path::{Path, PathBuf}, time::UNIX_EPOCH};
+use std::{collections::HashMap, convert::TryFrom, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize, NonZeroU64}, path::{Path, PathBuf}, time::UNIX_EPOCH};
 use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -15,7 +15,7 @@ use flate2::{Compression, write::ZlibEncoder};
 use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, record::CompressionBlock, walkdir::walkdir};
 use crate::Pak;
 use crate::result::Error;
-use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, compression_method_name};
+use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, DEFAULT_MIN_COMPRESSION_SIZE, compression_method_name};
 use crate::record::Record;
 use crate::util::{make_pak_path, parse_compression_level, parse_pak_path, parse_size};
 use crate::encode;
@@ -126,6 +126,7 @@ pub struct PackOptions<'a> {
     pub mount_point: Option<&'a str>,
     pub compression_method: u32,
     pub compression_block_size: NonZeroU32,
+    pub compression_min_size: NonZeroU64,
     pub compression_level: NonZeroU32,
     pub encoding: Encoding,
     pub verbose: bool,
@@ -141,6 +142,7 @@ impl Default for PackOptions<'_> {
             mount_point: None,
             compression_method: COMPR_NONE,
             compression_block_size: DEFAULT_BLOCK_SIZE,
+            compression_min_size: DEFAULT_MIN_COMPRESSION_SIZE,
             compression_level: DEFAULT_COMPRESSION_LEVEL,
             encoding: Encoding::default(),
             verbose: false,
@@ -513,6 +515,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
     let mut out_buffer = Vec::new();
 
     let compression_level = Compression::new(options.compression_level.get());
+    let compression_min_size = options.compression_min_size.get();
 
     let base_header_size = match options.variant {
         Variant::ConanExiles => {
@@ -584,11 +587,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
         let mut hasher = OpenSSLSha1::new();
 
-        if uncompressed_size <= 100 {
-            // It makes no sense to compress data <= 100 bytes because of
-            // compression overhead.
-            // In any case, the compression code below can't handle
-            // uncompressed_size == 0.
+        if uncompressed_size < compression_min_size {
             compression_method = COMPR_NONE;
         }
 

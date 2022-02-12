@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{convert::TryFrom, fmt::Display, num::NonZeroU32, path::Path, usize};
+use std::{convert::TryFrom, fmt::Display, num::{NonZeroU32, NonZeroU64}, path::Path, usize};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
 use log::{debug};
@@ -21,6 +21,7 @@ pub const PAK_MAX_SUPPORTED_VERSION: u32 = 11;
 
 pub const DEFAULT_BLOCK_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(64 * 1024) };
 pub const DEFAULT_COMPRESSION_LEVEL: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
+pub const DEFAULT_MIN_COMPRESSION_SIZE: NonZeroU64 = unsafe { NonZeroU64::new_unchecked(100) };
 
 pub const COMPR_NONE       : u32 = 0x00;
 pub const COMPR_ZLIB       : u32 = 0x01;
