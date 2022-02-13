@@ -6,9 +6,20 @@ use std::path::Path;
 use u4pak::index::Encoding;
 use u4pak::pak::Options;
 use u4pak::unpack::UnpackOptions;
-use u4pak::util::{make_pak_path, sha1_digest};
-use u4pak::walkdir::{walkdir, WalkDir};
+use u4pak::util::{sha1_digest};
+use u4pak::walkdir::{walkdir};
 use u4pak::{Error, Pak, Result, Variant};
+
+pub fn remove_dir_all_if_exists(path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+    if let Err(error) = std::fs::remove_dir_all(path) {
+        if let std::io::ErrorKind::NotFound = error.kind() {
+            return Ok(());
+        }
+        return Err(error);
+    }
+
+    Ok(())
+}
 
 pub fn unpack(path: &str, outdir: &str, encryption: Option<String>) -> Result<()> {
     let encryption_key = if let Some(key) = encryption {
@@ -59,7 +70,6 @@ pub fn unpack(path: &str, outdir: &str, encryption: Option<String>) -> Result<()
 }
 
 pub fn validate(source_dir: &str, out_dir: &str) -> Result<()> {
-    let source_path = Path::new(source_dir);
     let out_path = Path::new(out_dir);
 
     let iter = match walkdir(source_dir) {
@@ -75,7 +85,7 @@ pub fn validate(source_dir: &str, out_dir: &str) -> Result<()> {
         let file_path = entry.path();
         let file = match file_path.strip_prefix(source_dir) {
             Ok(file) => file,
-            Err(err) => return Err(Error::new(format!("Failed to strip prefix from {:?}", file_path).to_string()))
+            Err(err) => return Err(Error::new(format!("Failed to strip prefix from {:?}: {:?}", file_path, err).to_string()))
         };
 
         let out_path_buff = out_path.join(file);
