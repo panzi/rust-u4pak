@@ -348,7 +348,7 @@ fn read_secondary_index_records<R>(
                     let mut p = file_path.clone();
                     p.push_str(&name);
 
-                    encoded_record_info.seek(SeekFrom::Start(entry as u64));
+                    encoded_record_info.seek(SeekFrom::Start(entry as u64))?;
                     trace!("Decoding file {} from location {}", p, entry);
                     if let Ok(record) = Record::decode_entry(&mut encoded_record_info, p.clone()) {
                         records.push(record);
@@ -386,8 +386,8 @@ fn read_secondary_index_records<R>(
         debug!("Found {} files in hash index", file_count);
         for _ in 0..file_count {
             decode!(&mut index_buff, hash: u64, entry: u32);
-            
-            encoded_record_info.seek(SeekFrom::Start(entry as u64));
+
+            encoded_record_info.seek(SeekFrom::Start(entry as u64))?;
             trace!("Decoding file {:x} from location {}", hash, entry);
             if let Ok(record) = Record::decode_entry(&mut encoded_record_info, format!("{:x}", hash)) {
                 records.push(record);
