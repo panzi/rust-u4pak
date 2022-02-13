@@ -744,7 +744,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         }
                     }
 
-                    if size >= uncompressed_size {
+                    if size + blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE as u64 >= uncompressed_size {
                         // compressed actually bigger (or same size),
                         // so revert what we did and use uncompressed instead
 
