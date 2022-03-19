@@ -112,8 +112,8 @@ impl Index {
     {
         let mut index_buff = vec![0; index_size as usize];
         reader.read_exact(&mut index_buff)?;
-        if let Some(encryption_key) = encryption_key.clone() {
-            decrypt(&mut index_buff, encryption_key)
+        if let Some(encryption_key) = &encryption_key {
+            decrypt(&mut index_buff, &encryption_key);
         }
 
         let decrypted_index = &mut Cursor::new(index_buff);
@@ -296,7 +296,7 @@ fn read_secondary_index_records<R>(
     reader: &mut R,
     index_info: &SecondaryIndexInfo,
     encryption_key: Option<Vec<u8>>,
-    encoding: Encoding,
+    encoding: Encoding
 ) -> Result<Vec<Record>> where
     R: Read,
     R: Seek,
@@ -321,7 +321,7 @@ fn read_secondary_index_records<R>(
         }
 
         if let Some(key) = encryption_key {
-            decrypt(&mut full_directory_index_data, key);
+            decrypt(&mut full_directory_index_data, &key);
         }
 
         let mut index_buff = &full_directory_index_data[..];
@@ -378,7 +378,7 @@ fn read_secondary_index_records<R>(
         }
 
         if let Some(key) = encryption_key {
-            decrypt(&mut path_hash_index_data, key);
+            decrypt(&mut path_hash_index_data, &key);
         }
 
         let mut index_buff = &path_hash_index_data[..];

@@ -6,14 +6,13 @@
 
 use std::io::{Read, Write};
 use std::fmt::Write as FmtWrite;
+use aes::BLOCK_SIZE;
 
-use crate::{check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
+use crate::{Error, Result, check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
 use crate::encode::Encode;
-use crate::Result;
-use crate::decrypt;
 use crate::pak::V3_RECORD_HEADER_SIZE;
 use crate::util::align;
 
@@ -217,9 +216,9 @@ impl Record {
         // 6-21 : Compression blocks count
         // 22   : Encrypted
         // 23-28: Compression method
-        // 29   : Size 32-bit safe?
-        // 30   : Uncompressed size 32-bit safe?
-        // 31   : Offset 32-bit safe?
+        // 29   : Size 32-bit
+        // 30   : Uncompressed size 32-bit
+        // 31   : Offset 32-bit
         decode!(reader, bitfield: u32);
         let compression_method = (bitfield >> 23) & 0x3f;
         let offset: u64;
@@ -273,7 +272,7 @@ impl Record {
             } else if compression_block_count > 0 {
                 let mut blocks = vec![];
                 let block_alignment = if encrypted {
-                    decrypt::BLOCK_SIZE as u64
+                    BLOCK_SIZE as u64
                 } else {
                     1
                 };
