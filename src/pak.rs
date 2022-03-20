@@ -17,6 +17,7 @@ use crate::index::{Encoding, Index};
 pub const BUFFER_SIZE: usize = 2 * 1024 * 1024;
 
 pub const PAK_MAGIC: u32 = 0x5A6F12E1;
+pub const PAK_RELATIVE_COMPRESSION_OFFSET_VERSION: u32 = 5;
 pub const PAK_MAX_SUPPORTED_VERSION: u32 = 11;
 
 pub const DEFAULT_BLOCK_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(64 * 1024) };
@@ -294,12 +295,12 @@ impl Pak {
             Variant::Standard => match version {
                 1 => V1_RECORD_HEADER_SIZE,
                 2 => V2_RECORD_HEADER_SIZE,
-                _ if version <= 5 || version >= 7 => {
+                _ => {
                     let mut size: u64 = V3_RECORD_HEADER_SIZE;
 
                     if let Some(blocks) = &record.compression_blocks() {
                         size += blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE;
-                        if version >= 5 {
+                        if version >= 3 {
                             size += 4;
                         }
                     }

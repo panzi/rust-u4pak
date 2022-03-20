@@ -5,16 +5,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use aes::cipher::{BlockDecrypt, NewBlockCipher};
-use aes::{Aes256, Block};
+use aes::{Aes256, Block, BLOCK_SIZE};
+use log::trace;
 
-pub const BLOCK_SIZE: usize = 16;
-
-pub fn decrypt(data: &mut Vec<u8>, key: Vec<u8>) {
+pub fn decrypt(data: &mut Vec<u8>, key: &Vec<u8>) {
+    trace!("Decrypting data using aes256 with key {:?}", key);
     let cipher = Aes256::new_from_slice(&key).expect("Unable to convert key to Aes256 cipher");
-    assert_eq!(data.len() % 16, 0, "Data length must be a multiple of 16");
+    assert_eq!(data.len() % BLOCK_SIZE, 0, "Data length must be a multiple of 16");
 
     for block in data.chunks_mut(BLOCK_SIZE) {
         cipher.decrypt_block(Block::from_mut_slice(block));
     }
 }
-

@@ -4,19 +4,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::decrypt::BLOCK_SIZE;
-use crate::util::align;
-use crate::decrypt::decrypt;
 use std::{fs::OpenOptions, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
+use aes::BLOCK_SIZE;
 
-use crate::{Error, Result, pak::{self, COMPR_NONE, Variant, compression_method_name}, util::parse_pak_path};
+use crate::util::align;
+use crate::decrypt::decrypt;
+
+use crate::{Error, Result, Pak, pak::{self, COMPR_NONE, PAK_RELATIVE_COMPRESSION_OFFSET_VERSION, Variant, compression_method_name}, util::parse_pak_path};
 use crate::Record;
-use crate::Pak;
 use crate::Filter;
 use crate::reopen::Reopen;
 use log::{debug};
@@ -186,8 +186,9 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
             }
         }
     };
-    
-    in_file.seek(SeekFrom::Start(record.offset() + header_size))?;
+
+    let start_offset = record.offset() + header_size;
+    in_file.seek(SeekFrom::Start(start_offset))?;
 
     // Encrypted files need to be read in 16 byte blocks
     let buffer_length = if record.encrypted() {
@@ -214,8 +215,13 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
                 let mut out_buffer = Vec::with_capacity(record.compression_block_size() as usize);
 
                 for block in blocks {
-                    let block_start = (block.start_offset - header_size) as usize;
-                    let block_end = (block.end_offset - header_size) as usize;
+                    let mut block_start = (block.start_offset - header_size) as usize;
+                    let mut block_end = (block.end_offset - header_size) as usize;
+
+                    if version < PAK_RELATIVE_COMPRESSION_OFFSET_VERSION {
+                        block_start -= (start_offset - header_size) as usize;
+                        block_end -= (start_offset - header_size) as usize;
+                    }
 
                     let mut zlib = ZlibDecoder::new(&in_buffer[block_start..block_end]);
                     out_buffer.clear();
@@ -265,7 +271,7 @@ fn worker_proc(in_file: &mut File, version: u32, variant: Variant, encryption_ke
 fn decrypt_entry(buffer: &mut Vec<u8>, record: &Record, encryption_key: Option<Vec<u8>>, size: usize) -> Result<()> {
     if record.encrypted() {
         if let Some(key) = encryption_key {
-            decrypt(buffer, key);
+            decrypt(buffer, &key);
             // Trim padded bytes from undersized encryption blocks
             buffer.truncate(size);
         } else {
