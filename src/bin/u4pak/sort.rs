@@ -82,7 +82,7 @@ impl SortKey {
     #[inline]
     pub fn to_cmp(&self) -> impl Fn(&Record, &Record) -> Ordering {
         match self {
-            SortKey::Name              => |a: &Record, b: &Record| a.filename().cmp(&b.filename()),
+            SortKey::Name              => |a: &Record, b: &Record| a.filename().cmp(b.filename()),
             SortKey::Size              => |a: &Record, b: &Record| a.size().cmp(&b.size()),
             SortKey::Offset            => |a: &Record, b: &Record| a.offset().cmp(&b.offset()),
             SortKey::ComprMethod       => |a: &Record, b: &Record| a.compression_method().cmp(&b.compression_method()),
@@ -91,7 +91,7 @@ impl SortKey {
             SortKey::Timestamp         => |a: &Record, b: &Record| a.timestamp().cmp(&b.timestamp()),
             SortKey::Encrypted         => |a: &Record, b: &Record| a.encrypted().cmp(&b.encrypted()),
 
-            SortKey::RevName           => |a: &Record, b: &Record| b.filename().cmp(&a.filename()),
+            SortKey::RevName           => |a: &Record, b: &Record| b.filename().cmp(a.filename()),
             SortKey::RevSize           => |a: &Record, b: &Record| b.size().cmp(&a.size()),
             SortKey::RevOffset         => |a: &Record, b: &Record| b.offset().cmp(&a.offset()),
             SortKey::RevComprMethod    => |a: &Record, b: &Record| b.compression_method().cmp(&a.compression_method()),
