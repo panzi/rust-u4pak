@@ -601,20 +601,14 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
-            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
-                Some(
-                    base64::decode(
+            let encryption_key = args.value_of("encryption-key").map(|key| base64::decode(
                         key.parse::<String>()
                             .expect("Failed to read encryption key."),
                     )
-                    .expect("Failed to parse encryption key."),
-                )
-            } else {
-                None
-            };
+                    .expect("Failed to parse encryption key."));
 
             let pak = Pak::from_path(
-                &path,
+                path,
                 Options {
                     variant,
                     ignore_magic,
@@ -655,17 +649,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
-            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
-                Some(
-                    base64::decode(
+            let encryption_key = args.value_of("encryption-key").map(|key| base64::decode(
                         key.parse::<String>()
                             .expect("Failed to read encryption key."),
                     )
-                    .expect("Failed to parse encryption key."),
-                )
-            } else {
-                None
-            };
+                    .expect("Failed to parse encryption key."));
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
@@ -724,17 +712,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
-            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
-                Some(
-                    base64::decode(
+            let encryption_key = args.value_of("encryption-key").map(|key| base64::decode(
                         key.parse::<String>()
                             .expect("Failed to read encryption key."),
                     )
-                    .expect("Failed to parse encryption key."),
-                )
-            } else {
-                None
-            };
+                    .expect("Failed to parse encryption key."));
 
             let mut file = match File::open(path) {
                 Ok(file) => file,
@@ -796,17 +778,11 @@ fn run(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
-            let encryption_key = if let Some(key) = args.value_of("encryption-key") {
-                Some(
-                    base64::decode(
+            let encryption_key = args.value_of("encryption-key").map(|key| base64::decode(
                         key.parse::<String>()
                             .expect("Failed to read encryption key."),
                     )
-                    .expect("Failed to parse encryption key."),
-                )
-            } else {
-                None
-            };
+                    .expect("Failed to parse encryption key."));
 
             let mut file = match File::open(path) {
                 Ok(file) => file,

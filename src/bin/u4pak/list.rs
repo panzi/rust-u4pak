@@ -16,7 +16,7 @@ use u4pak::pak::{Pak, compression_method_name, HexDisplay};
 use u4pak::check::NULL_SHA1;
 use crate::sort::{sort, Order};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ListStyle {
     Table { human_readable: bool, no_header: bool },
     OnlyNames { null_separated: bool },
@@ -97,7 +97,7 @@ fn list_records(version: u32, records: &[impl AsRef<Record>], options: ListOptio
             let mut body: Vec<Vec<String>> = Vec::new();
 
             let fmt_size = if human_readable {
-                |size: u64| format_size(size)
+                format_size
             } else {
                 |size: u64| format!("{}", size)
             };

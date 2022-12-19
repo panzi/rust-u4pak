@@ -7,7 +7,6 @@
 use std::io::Read;
 use std::str::FromStr;
 use core::num::NonZeroU32;
-use openssl::sha::Sha1 as OpenSSLSha1;
 
 use crate::{Result, Error};
 
@@ -138,28 +137,28 @@ pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>:
     }
 
     if value.ends_with('K') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024)
     } else if value.ends_with('M') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024)
     } else if value.ends_with('G') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024)
     } else if value.ends_with('T') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('P') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('E') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Z') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Y') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else {
         value.parse()
@@ -210,16 +209,16 @@ pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
                 Ok(NonZeroU32::new(level).unwrap())
             }
             _ => {
-                return Err(Error::new(format!(
+                Err(Error::new(format!(
                     "illegal compression level: {:?}",
-                    value)));
+                    value)))
             }
         }
     }
 }
 
 pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
     let mut buffer = [0; 1024];
 
     loop {
@@ -230,5 +229,5 @@ pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(hasher.finish())
+    Ok(hasher.digest().bytes())
 }

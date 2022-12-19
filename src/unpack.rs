@@ -10,7 +10,7 @@ use std::fs::File;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
-use aes::BLOCK_SIZE;
+use super::BLOCK_SIZE;
 
 use crate::util::align;
 use crate::decrypt::decrypt;
@@ -137,7 +137,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 
     match thread_result {
         Err(error) => {
-            return Err(Error::new(format!("threading error: {:?}", error)));
+            Err(Error::new(format!("threading error: {:?}", error)))
         }
         Ok(result) => result
     }

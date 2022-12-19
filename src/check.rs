@@ -8,7 +8,6 @@ use std::{collections::HashSet, fs::File, io::{BufReader, Read, Seek, SeekFrom, 
 
 use crossbeam_channel::{Sender, unbounded};
 use crossbeam_utils::thread;
-use openssl::sha::Sha1 as OpenSSLSha1;
 
 use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1, Variant}};
 use crate::reopen::Reopen;
@@ -75,22 +74,22 @@ where R: Read, R: Seek {
         return Ok(());
     }
     reader.seek(SeekFrom::Start(offset))?;
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
     let mut remaining = size;
     buffer.resize(BUFFER_SIZE, 0);
     loop {
         if remaining >= BUFFER_SIZE as u64 {
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             remaining -= BUFFER_SIZE as u64;
         } else {
             let buffer = &mut buffer[..remaining as usize];
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             break;
         }
     }
-    let actual_digest = hasher.finish();
+    let actual_digest = hasher.digest().bytes();
     if &actual_digest != checksum {
         return Err(Error::new(format!(
             "checksum missmatch:\n\
@@ -222,7 +221,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                     if let Some(blocks) = record.compression_blocks() {
                         if !ignore_null_checksums || record.sha1().map_or(true, |sha1| sha1 != NULL_SHA1) {
                             let header_size = Pak::header_size(version, variant, record);
-                            let mut hasher = OpenSSLSha1::new();
+                            let mut hasher = sha1_smol::Sha1::new();
 
                             let base_offset;
                             let mut next_start_offset;
@@ -285,7 +284,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                                     )).with_path(record.filename()));
                             }
 
-                            let actual_digest = hasher.finish();
+                            let actual_digest = hasher.digest().bytes();
                             if &actual_digest != record.sha1().as_ref().unwrap_or(&NULL_SHA1) {
                                 check_error!(ok, result_sender, abort_on_error, Error::new(format!(
                                     "checksum missmatch:\n\
@@ -363,7 +362,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
 
     match thread_result {
         Err(error) => {
-            return Err(Error::new(format!("threading error: {:?}", error)));
+            Err(Error::new(format!("threading error: {:?}", error)))
         }
         Ok(result) => result
     }

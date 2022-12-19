@@ -17,17 +17,18 @@ path="src/lib.rs"
 clap = "2.34"
 chrono = "0.4"
 flate2 = "1.0.22"
-#flate2 = { version = "1.0.20", features = ["zlib"], default-features = false }
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
 num_cpus = "1.13.1"
-# OpenSSL's SHA-1 implementation is much faster than the one in rust-crypto
-openssl = { version = "0.10", features = ["vendored"] }
-terminal_size = "0.1.17"
-aes = "0.7.5"
-base64 = "0.13.0"
+# OpenSSL adds too much bloat and is not in pure rust
+# it requires the user to compile and install the c source
+# it is not essential for the sha1 to be extremely fast
+sha1_smol = "1.0"
+terminal_size = "0.2"
+aes = "0.8"
+base64 = "0.20"
 log = "0.4"
-env_logger = "0.9.0"
+env_logger = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # for sendfile() and fuse support

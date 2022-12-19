@@ -10,7 +10,7 @@ use crate::util::{format_size, Align};
 
 pub fn info(pak: &Pak, human_readable: bool) -> Result<()> {
     let fmt_size = if human_readable {
-        |size: u64| format_size(size)
+        format_size
     } else {
         |size: u64| format!("{}", size)
     };

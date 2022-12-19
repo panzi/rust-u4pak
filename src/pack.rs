@@ -9,7 +9,6 @@ use std::fs::{OpenOptions, File};
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
-use openssl::sha::Sha1 as OpenSSLSha1;
 use flate2::{Compression, write::ZlibEncoder};
 
 use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, record::CompressionBlock, walkdir::walkdir};
@@ -101,20 +100,20 @@ impl TryFrom<&str> for PackPath {
                     }
                 }
 
-                return Ok(Self {
+                Ok(Self {
                     compression_block_size,
                     compression_level,
                     compression_method,
                     filename: filename.to_string(),
                     rename,
-                });
+                })
             } else {
-                return Err(Error::new(format!(
+                Err(Error::new(format!(
                     "illegal path specification, expected a second ':' in: {:?}",
-                    path_spec)));
+                    path_spec)))
             }
         } else {
-            return Ok(Self::new(path_spec.to_string()));
+            Ok(Self::new(path_spec.to_string()))
         }
     }
 }
@@ -244,7 +243,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             let source_path: PathBuf;
             let filename = if let Some(filename) = &path.rename {
                 source_path = (&path.filename).into();
-                parse_pak_path(&filename).collect::<Vec<_>>()
+                parse_pak_path(filename).collect::<Vec<_>>()
             } else {
                 #[cfg(target_os = "windows")]
                 let filename = path.filename
@@ -373,7 +372,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     let mount_pount = options.mount_point.unwrap_or("");
 
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
 
     buffer.clear();
 
@@ -420,7 +419,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         index_size += buffer.len() as u64;
     }
 
-    let index_sha1: Sha1 = hasher.finish();
+    let index_sha1: Sha1 = hasher.digest().bytes();
 
     encode!(&mut writer,
         PAK_MAGIC,
@@ -512,7 +511,7 @@ struct Work<'a> {
 
 #[inline]
 fn write_uncompressed(data: &mut Vec<u8>, header_buffer: &mut Vec<u8>, base_header_size: u64, in_file: &mut File, uncompressed_size: u64, buffer: &mut Vec<u8>) -> Result<Sha1> {
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
 
     data.write_all(&header_buffer[..base_header_size as usize])?;
 
@@ -539,7 +538,7 @@ fn write_uncompressed(data: &mut Vec<u8>, header_buffer: &mut Vec<u8>, base_head
         hasher.update(buffer);
     }
 
-    Ok(hasher.finish())
+    Ok(hasher.digest().bytes())
 }
 
 fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_channel: Sender<Result<(Record, Vec<u8>)>>) -> Result<()> {
@@ -630,7 +629,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                 sha1 = write_uncompressed(&mut data, &mut header_buffer, base_header_size, &mut in_file, uncompressed_size, &mut buffer)?;
             }
             self::COMPR_ZLIB => {
-                let mut hasher = OpenSSLSha1::new();
+                let mut hasher = sha1_smol::Sha1::new();
 
                 let compression_level = if let Some(compression_level) = path.compression_level {
                     Compression::new(compression_level.get())
@@ -650,7 +649,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                         out_buffer.clear();
                         let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                        zlib.write_all(&buffer)?;
+                        zlib.write_all(buffer)?;
                         zlib.finish()?;
                     }
 
@@ -669,7 +668,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                     } else {
                         data.write_all(&out_buffer)?;
                         hasher.update(&out_buffer);
-                        sha1 = hasher.finish();
+                        sha1 = hasher.digest().bytes();
                     }
                 } else {
                     size = 0u64;
@@ -705,7 +704,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                             out_buffer.clear();
                             let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                            zlib.write_all(&buffer)?;
+                            zlib.write_all(buffer)?;
                             zlib.finish()?;
                             data.write_all(&out_buffer)?;
                             hasher.update(&out_buffer);
@@ -756,7 +755,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         sha1 = write_uncompressed(&mut data, &mut header_buffer, base_header_size, &mut in_file, uncompressed_size, &mut buffer)?;
                     } else {
                         compression_blocks = Some(blocks);
-                        sha1 = hasher.finish();
+                        sha1 = hasher.digest().bytes();
                     }
                 }
             }

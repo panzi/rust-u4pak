@@ -78,7 +78,7 @@ impl<'a> Display for HexDisplay<'a> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Variant {
     Standard,
     ConanExiles,
@@ -179,7 +179,7 @@ impl Pak {
                     Err(error)
                 },
             }
-            Err(error) => Err(Error::io_with_path(error, path.as_ref().to_path_buf())),
+            Err(error) => Err(Error::io_with_path(error, path.as_ref())),
         }
     }
 
@@ -200,15 +200,13 @@ impl Pak {
                     footer.magic
                 )));
             }
+        } else if let Ok(version) = Self::get_version(reader) {
+            debug!("Determined pak version {}", version);
+            footer = Self::decode_footer(reader, version)?;
+        } else if options.ignore_magic {
+            footer = Self::decode_footer(reader, PAK_MAX_SUPPORTED_VERSION)?;
         } else {
-            if let Ok(version) = Self::get_version(reader) {
-                debug!("Determined pak version {}", version);
-                footer = Self::decode_footer(reader, version)?;
-            } else if options.ignore_magic {
-                footer = Self::decode_footer(reader, PAK_MAX_SUPPORTED_VERSION)?;
-            } else {
-                return Err(Error::new(format!("Failed to determine pak file version.")))
-            }
+            return Err(Error::new("Failed to determine pak file version.".to_string()))
         }
 
         let variant = options.variant;
@@ -305,9 +303,6 @@ impl Pak {
                         }
                     }
                     size
-                }
-                _ => {
-                    panic!("unsupported version: {}", version)
                 }
             },
         }
@@ -424,7 +419,7 @@ impl Pak {
                         index_sha1: Sha1,
                         compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
@@ -435,7 +430,7 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: compression.to_vec(),
-                    });
+                    })
                 }
                 9 => {
                     decode!(
@@ -450,7 +445,7 @@ impl Pak {
                         frozen: bool,
                         compression: [u8; PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
@@ -461,7 +456,7 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: compression.to_vec(),
-                    });
+                    })
                 }
                 8 => {
                     decode!(
@@ -475,7 +470,7 @@ impl Pak {
                         index_sha1: Sha1,
                         compression: [u8; V8_PAK_COMPRESSION_METHOD_COUNT * PAK_COMPRESSION_METHOD_SIZE]
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
@@ -486,7 +481,7 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: compression.to_vec(),
-                    });
+                    })
                 }
                 7 => {
                     decode!(
@@ -499,7 +494,7 @@ impl Pak {
                         index_size: u64,
                         index_sha1: Sha1
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
@@ -510,7 +505,7 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: vec![],
-                    });
+                    })
                 }
                 _ if target_version >= 4 => {
                     decode!(
@@ -522,7 +517,7 @@ impl Pak {
                         index_size: u64,
                         index_sha1: Sha1,
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted,
@@ -533,7 +528,7 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: vec![],
-                    });
+                    })
                 }
                 _ => {
                     decode!(
@@ -544,7 +539,7 @@ impl Pak {
                         index_size: u64,
                         index_sha1: Sha1,
                     );
-                    return Ok(Footer {
+                    Ok(Footer {
                         footer_offset: offset,
                         encryption_uuid,
                         encrypted: false,
@@ -555,13 +550,13 @@ impl Pak {
                         index_sha1,
                         frozen,
                         compression: vec![],
-                    });
+                    })
                 }
             }
         } else if let Err(error) = footer_offset {
-            return Err(Error::from(error));
+            Err(Error::from(error))
         } else {
-            return Err(Error::new(format!("Failed to read footer.")))
+            Err(Error::new("Failed to read footer.".to_string()))
         }
     }
 }
