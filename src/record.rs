@@ -4,22 +4,32 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::{Read, Write};
+use super::BLOCK_SIZE;
 use std::fmt::Write as FmtWrite;
-use aes::BLOCK_SIZE;
+use std::io::{Read, Write};
 
-use crate::{Error, Result, check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
 use crate::encode::Encode;
 use crate::pak::V3_RECORD_HEADER_SIZE;
 use crate::util::align;
+use crate::{
+    check::NULL_SHA1,
+    pak::{HexDisplay, Sha1, COMPR_NONE},
+    Result,
+};
 
 macro_rules! cmp_record_field {
     ($buf:expr, $field:ident, $r1:expr, $r2:expr) => {
         if $r1.$field != $r2.$field {
-            let _ = write!($buf, "\t{}: {:?} != {:?}\n", stringify!($field), $r1.$field, $r2.$field);
+            let _ = write!(
+                $buf,
+                "\t{}: {:?} != {:?}\n",
+                stringify!($field),
+                $r1.$field,
+                $r2.$field
+            );
         }
     };
 }
@@ -72,7 +82,15 @@ impl Record {
         }
     }
 
-    pub fn v1(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, timestamp: u64, sha1: Option<Sha1>) -> Self {
+    pub fn v1(
+        filename: String,
+        offset: u64,
+        size: u64,
+        uncompressed_size: u64,
+        compression_method: u32,
+        timestamp: u64,
+        sha1: Option<Sha1>,
+    ) -> Self {
         Self {
             filename,
             offset,
@@ -87,7 +105,14 @@ impl Record {
         }
     }
 
-    pub fn v2(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Option<Sha1>) -> Self {
+    pub fn v2(
+        filename: String,
+        offset: u64,
+        size: u64,
+        uncompressed_size: u64,
+        compression_method: u32,
+        sha1: Option<Sha1>,
+    ) -> Self {
         Self {
             filename,
             offset,
@@ -102,8 +127,17 @@ impl Record {
         }
     }
 
-    pub fn v3(filename: String, offset: u64, size: u64, uncompressed_size: u64, compression_method: u32, sha1: Option<Sha1>,
-              compression_blocks: Option<Vec<CompressionBlock>>, encrypted: bool, compression_block_size: u32) -> Self {
+    pub fn v3(
+        filename: String,
+        offset: u64,
+        size: u64,
+        uncompressed_size: u64,
+        compression_method: u32,
+        sha1: Option<Sha1>,
+        compression_blocks: Option<Vec<CompressionBlock>>,
+        encrypted: bool,
+        compression_block_size: u32,
+    ) -> Self {
         Self {
             filename,
             offset,
@@ -169,7 +203,8 @@ impl Record {
     }
 
     pub fn read_v1(reader: &mut impl Read, filename: String) -> Result<Record> {
-        decode!(reader,
+        decode!(
+            reader,
             offset: u64,
             size: u64,
             uncompressed_size: u64,
@@ -178,11 +213,20 @@ impl Record {
             sha1: Sha1,
         );
 
-        Ok(Record::v1(filename, offset, size, uncompressed_size, compression_method, timestamp, Some(sha1)))
+        Ok(Record::v1(
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            timestamp,
+            Some(sha1),
+        ))
     }
 
     pub fn read_v2(reader: &mut impl Read, filename: String) -> Result<Record> {
-        decode!(reader,
+        decode!(
+            reader,
             offset: u64,
             size: u64,
             uncompressed_size: u64,
@@ -190,7 +234,14 @@ impl Record {
             sha1: Sha1,
         );
 
-        Ok(Record::v2(filename, offset, size, uncompressed_size, compression_method, Some(sha1)))
+        Ok(Record::v2(
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            Some(sha1),
+        ))
     }
 
     pub fn read_v3(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -207,7 +258,17 @@ impl Record {
             compression_block_size: u32,
         );
 
-        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, Some(sha1), compression_blocks, encrypted != 0, compression_block_size))
+        Ok(Record::v3(
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            Some(sha1),
+            compression_blocks,
+            encrypted != 0,
+            compression_block_size,
+        ))
     }
 
     pub fn decode_entry(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -264,27 +325,25 @@ impl Record {
             };
 
             if compression_block_count == 1 && !encrypted {
-                let start = Record::get_serialized_size(compression_method, compression_block_count);
+                let start =
+                    Record::get_serialized_size(compression_method, compression_block_count);
                 compression_blocks = Some(vec![CompressionBlock {
                     start_offset: start,
-                    end_offset: start + size
+                    end_offset: start + size,
                 }]);
             } else if compression_block_count > 0 {
                 let mut blocks = vec![];
-                let block_alignment = if encrypted {
-                    BLOCK_SIZE as u64
-                } else {
-                    1
-                };
+                let block_alignment = if encrypted { BLOCK_SIZE as u64 } else { 1 };
 
-                let mut start_offset = Record::get_serialized_size(compression_method, compression_block_count);
+                let mut start_offset =
+                    Record::get_serialized_size(compression_method, compression_block_count);
                 for _ in 0..compression_block_count {
                     decode!(reader, block_size: u32);
                     let end_offset = start_offset + block_size as u64;
 
                     blocks.push(CompressionBlock {
                         start_offset,
-                        end_offset
+                        end_offset,
                     });
                     start_offset += align(block_size as u64, block_alignment)
                 }
@@ -293,7 +352,18 @@ impl Record {
             }
         }
 
-        Ok(Self::new(filename, offset, size, uncompressed_size, compression_method, None, None, compression_blocks, encrypted, compression_block_size))
+        Ok(Self::new(
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            None,
+            None,
+            compression_blocks,
+            encrypted,
+            compression_block_size,
+        ))
     }
 
     pub fn read_conan_exiles(reader: &mut impl Read, filename: String) -> Result<Record> {
@@ -312,10 +382,23 @@ impl Record {
         );
 
         if unknown != 0 {
-            eprintln!("{}: WARNING: unknown field has other value than 0: {}", filename, unknown);
+            eprintln!(
+                "{}: WARNING: unknown field has other value than 0: {}",
+                filename, unknown
+            );
         }
 
-        Ok(Record::v3(filename, offset, size, uncompressed_size, compression_method, Some(sha1), compression_blocks, encrypted != 0, compression_block_size))
+        Ok(Record::v3(
+            filename,
+            offset,
+            size,
+            uncompressed_size,
+            compression_method,
+            Some(sha1),
+            compression_blocks,
+            encrypted != 0,
+            compression_block_size,
+        ))
     }
 
     fn get_serialized_size(compression_method: u32, compression_block_count: u32) -> u64 {
@@ -328,7 +411,8 @@ impl Record {
     }
 
     pub fn write_v1(&self, writer: &mut impl Write) -> Result<()> {
-        encode!(writer,
+        encode!(
+            writer,
             self.offset,
             self.size,
             self.uncompressed_size,
@@ -340,7 +424,8 @@ impl Record {
     }
 
     pub fn write_v1_inline(&self, writer: &mut impl Write) -> Result<()> {
-        encode!(writer,
+        encode!(
+            writer,
             0u64,
             self.size,
             self.uncompressed_size,
@@ -352,7 +437,8 @@ impl Record {
     }
 
     pub fn write_v2(&self, writer: &mut impl Write) -> Result<()> {
-        encode!(writer,
+        encode!(
+            writer,
             self.offset,
             self.size,
             self.uncompressed_size,
@@ -363,7 +449,8 @@ impl Record {
     }
 
     pub fn write_v2_inline(&self, writer: &mut impl Write) -> Result<()> {
-        encode!(writer,
+        encode!(
+            writer,
             0u64,
             self.size,
             self.uncompressed_size,
@@ -443,35 +530,40 @@ impl Record {
     pub fn same_metadata(&self, other: &Record) -> bool {
         // compare all metadata except for the filename
         // data records always have offset == 0 it seems, so skip that
-        self.size                   == other.size               &&
-        self.uncompressed_size      == other.uncompressed_size  &&
-        self.compression_method     == other.compression_method &&
-        self.timestamp              == other.timestamp          &&
-        self.sha1                   == other.sha1               &&
-        self.compression_blocks     == other.compression_blocks &&
-        self.encrypted              == other.encrypted          &&
-        self.compression_block_size == other.compression_block_size
+        self.size == other.size
+            && self.uncompressed_size == other.uncompressed_size
+            && self.compression_method == other.compression_method
+            && self.timestamp == other.timestamp
+            && self.sha1 == other.sha1
+            && self.compression_blocks == other.compression_blocks
+            && self.encrypted == other.encrypted
+            && self.compression_block_size == other.compression_block_size
     }
 
     pub fn metadata_diff(&self, other: &Record) -> String {
         let mut buf = String::new();
 
-        cmp_record_field!(buf, size,                   self, other);
-        cmp_record_field!(buf, uncompressed_size,      self, other);
-        cmp_record_field!(buf, timestamp,              self, other);
-        cmp_record_field!(buf, encrypted,              self, other);
+        cmp_record_field!(buf, size, self, other);
+        cmp_record_field!(buf, uncompressed_size, self, other);
+        cmp_record_field!(buf, timestamp, self, other);
+        cmp_record_field!(buf, encrypted, self, other);
         cmp_record_field!(buf, compression_block_size, self, other);
 
         if self.sha1 != other.sha1 {
-            let _ = write!(buf, "\tsha1: {} != {}",
+            let _ = write!(
+                buf,
+                "\tsha1: {} != {}",
                 HexDisplay::new(self.sha1.as_ref().unwrap_or(&NULL_SHA1)),
-                HexDisplay::new(other.sha1.as_ref().unwrap_or(&NULL_SHA1)));
+                HexDisplay::new(other.sha1.as_ref().unwrap_or(&NULL_SHA1))
+            );
         }
 
         if self.compression_blocks != other.compression_blocks {
-            let _ = write!(buf, "\tcompression_blocks:\n\t\t{:?}\n\t\t\t!=\n\t\t{:?}",
-                self.compression_blocks,
-                other.compression_blocks);
+            let _ = write!(
+                buf,
+                "\tcompression_blocks:\n\t\t{:?}\n\t\t\t!=\n\t\t{:?}",
+                self.compression_blocks, other.compression_blocks
+            );
         }
 
         buf
@@ -482,7 +574,7 @@ impl Record {
             if let Some(blocks) = &mut self.compression_blocks {
                 for block in blocks {
                     block.start_offset = (block.start_offset - self.offset) + new_offset;
-                    block.end_offset   = (block.end_offset   - self.offset) + new_offset
+                    block.end_offset = (block.end_offset - self.offset) + new_offset
                 }
             }
         }

@@ -4,18 +4,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use core::num::NonZeroU32;
 use std::io::Read;
 use std::str::FromStr;
-use core::num::NonZeroU32;
-use openssl::sha::Sha1 as OpenSSLSha1;
 
-use crate::{Result, Error};
+use crate::{Error, Result};
 
 pub fn format_size(size: u64) -> String {
     if size >= 1024 * 1024 * 1024 * 1024 * 1024 * 1024 {
-        format!("{:.1} E", (size / (1024 * 1024 * 1024 * 1024 * 1024)) as f64 / 1024.0)
+        format!(
+            "{:.1} E",
+            (size / (1024 * 1024 * 1024 * 1024 * 1024)) as f64 / 1024.0
+        )
     } else if size >= 1024 * 1024 * 1024 * 1024 * 1024 {
-        format!("{:.1} P", (size / (1024 * 1024 * 1024 * 1024)) as f64 / 1024.0)
+        format!(
+            "{:.1} P",
+            (size / (1024 * 1024 * 1024 * 1024)) as f64 / 1024.0
+        )
     } else if size >= 1024 * 1024 * 1024 * 1024 {
         format!("{:.1} T", (size / (1024 * 1024 * 1024)) as f64 / 1024.0)
     } else if size >= 1024 * 1024 * 1024 {
@@ -31,21 +36,21 @@ pub fn format_size(size: u64) -> String {
 
 pub enum Align {
     Left,
-    Right
+    Right,
 }
 
 impl Align {
     #[allow(unused)]
     pub fn is_left(&self) -> bool {
         match self {
-            Align::Left  => true,
+            Align::Left => true,
             Align::Right => false,
         }
     }
 
     pub fn is_right(&self) -> bool {
         match self {
-            Align::Left  => false,
+            Align::Left => false,
             Align::Right => true,
         }
     }
@@ -56,7 +61,9 @@ pub fn print_row(row: &[impl AsRef<str>], lens: &[usize], align: &[Align]) {
     if cell_count > 0 {
         let mut first = true;
         let last_index = cell_count - 1;
-        for (index, ((cell, len), align)) in row.iter().zip(lens.iter()).zip(align.iter()).enumerate() {
+        for (index, ((cell, len), align)) in
+            row.iter().zip(lens.iter()).zip(align.iter()).enumerate()
+        {
             if first {
                 first = false;
             } else {
@@ -97,7 +104,9 @@ pub fn print_table(header: &[impl AsRef<str>], align: &[Align], body: &[Vec<impl
     }
 
     print_row(header, &lens, align);
-    let line_len = if lens.is_empty() { 0 } else {
+    let line_len = if lens.is_empty() {
+        0
+    } else {
         lens.iter().sum::<usize>() + 2 * (lens.len() - 1)
     };
     for _ in 0..line_len {
@@ -138,41 +147,41 @@ pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>:
     }
 
     if value.ends_with('K') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024)
     } else if value.ends_with('M') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024)
     } else if value.ends_with('G') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024)
     } else if value.ends_with('T') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('P') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('E') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Z') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Y') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else {
         value.parse()
     }
 }
 
-pub fn parse_pak_path(path: &str) -> impl std::iter::Iterator<Item=&str> {
+pub fn parse_pak_path(path: &str) -> impl std::iter::Iterator<Item = &str> {
     path.trim_matches('/')
         .split('/')
         .filter(|comp| !comp.is_empty())
 }
 
-pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<str>>) -> String {
+pub fn make_pak_path(mut components: impl std::iter::Iterator<Item = impl AsRef<str>>) -> String {
     let mut path = String::new();
     if let Some(first) = components.next() {
         path.push_str(first.as_ref());
@@ -188,14 +197,18 @@ pub fn make_pak_path(mut components: impl std::iter::Iterator<Item=impl AsRef<st
 
 // Align to power of 2 alignment
 pub fn align(val: u64, alignment: u64) -> u64 {
-    assert_eq!(alignment & (alignment - 1), 0, "Alignment must be a power of 2");
+    assert_eq!(
+        alignment & (alignment - 1),
+        0,
+        "Alignment must be a power of 2"
+    );
     // Add alignment        Zero out alignment bits
     (val + alignment - 1) & !(alignment - 1)
 }
 
-pub const COMPR_LEVEL_FAST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+pub const COMPR_LEVEL_FAST: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
 pub const COMPR_LEVEL_DEFAULT: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(6) };
-pub const COMPR_LEVEL_BEST:    NonZeroU32 = unsafe { NonZeroU32::new_unchecked(9) };
+pub const COMPR_LEVEL_BEST: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(9) };
 
 pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
     if value.eq_ignore_ascii_case("best") {
@@ -206,20 +219,17 @@ pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
         Ok(COMPR_LEVEL_DEFAULT)
     } else {
         match value.parse() {
-            Ok(level) if level > 0 && level < 10 => {
-                Ok(NonZeroU32::new(level).unwrap())
-            }
-            _ => {
-                return Err(Error::new(format!(
-                    "illegal compression level: {:?}",
-                    value)));
-            }
+            Ok(level) if level > 0 && level < 10 => Ok(NonZeroU32::new(level).unwrap()),
+            _ => Err(Error::new(format!(
+                "illegal compression level: {:?}",
+                value
+            ))),
         }
     }
 }
 
 pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
     let mut buffer = [0; 1024];
 
     loop {
@@ -230,5 +240,5 @@ pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(hasher.finish())
+    Ok(hasher.digest().bytes())
 }

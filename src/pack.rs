@@ -4,24 +4,42 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashMap, convert::TryFrom, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::{NonZeroU32, NonZeroUsize, NonZeroU64}, path::{Path, PathBuf}, time::UNIX_EPOCH};
-use std::fs::{OpenOptions, File};
+use std::fs::{File, OpenOptions};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
+    path::{Path, PathBuf},
+    time::UNIX_EPOCH,
+};
 
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossbeam_utils::thread;
-use openssl::sha::Sha1 as OpenSSLSha1;
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::{write::ZlibEncoder, Compression};
 
-use crate::{Result, pak::{BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE, DEFAULT_COMPRESSION_LEVEL, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE, V3_RECORD_HEADER_SIZE, Variant}, record::CompressionBlock, walkdir::walkdir};
-use crate::Pak;
-use crate::result::Error;
-use crate::pak::{PAK_MAGIC, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE, DEFAULT_MIN_COMPRESSION_SIZE, compression_method_name};
-use crate::record::Record;
-use crate::util::{make_pak_path, parse_compression_level, parse_pak_path, parse_size};
 use crate::encode;
 use crate::encode::Encode;
 use crate::index::Encoding;
 use crate::index::Index;
+use crate::pak::{
+    compression_method_name, Sha1, COMPR_NONE, COMPR_ZLIB, DEFAULT_BLOCK_SIZE,
+    DEFAULT_MIN_COMPRESSION_SIZE, PAK_MAGIC,
+};
+use crate::record::Record;
+use crate::result::Error;
+use crate::util::{make_pak_path, parse_compression_level, parse_pak_path, parse_size};
+use crate::Pak;
+use crate::{
+    pak::{
+        Variant, BUFFER_SIZE, COMPRESSION_BLOCK_HEADER_SIZE, CONAN_EXILE_RECORD_HEADER_SIZE,
+        DEFAULT_COMPRESSION_LEVEL, V1_RECORD_HEADER_SIZE, V2_RECORD_HEADER_SIZE,
+        V3_RECORD_HEADER_SIZE,
+    },
+    record::CompressionBlock,
+    walkdir::walkdir,
+    Result,
+};
 
 pub const COMPR_DEFAULT: u32 = u32::MAX;
 
@@ -77,7 +95,9 @@ impl TryFrom<&str> for PackPath {
                                 compression_block_size = Some(DEFAULT_BLOCK_SIZE);
                             } else {
                                 match parse_size(value) {
-                                    Ok(block_size) if block_size > 0 && block_size <= u32::MAX as usize => {
+                                    Ok(block_size)
+                                        if block_size > 0 && block_size <= u32::MAX as usize =>
+                                    {
                                         compression_block_size = NonZeroU32::new(block_size as u32);
                                     }
                                     _ => {
@@ -92,29 +112,32 @@ impl TryFrom<&str> for PackPath {
                         } else {
                             return Err(Error::new(format!(
                                 "illegal path specification, unhandeled parameter {:?} in: {:?}",
-                                param, path_spec)));
+                                param, path_spec
+                            )));
                         }
                     } else {
                         return Err(Error::new(format!(
                             "illegal path specification, unhandeled parameter {:?} in: {:?}",
-                            param, path_spec)));
+                            param, path_spec
+                        )));
                     }
                 }
 
-                return Ok(Self {
+                Ok(Self {
                     compression_block_size,
                     compression_level,
                     compression_method,
                     filename: filename.to_string(),
                     rename,
-                });
+                })
             } else {
-                return Err(Error::new(format!(
+                Err(Error::new(format!(
                     "illegal path specification, expected a second ':' in: {:?}",
-                    path_spec)));
+                    path_spec
+                )))
             }
         } else {
-            return Ok(Self::new(path_spec.to_string()));
+            Ok(Self::new(path_spec.to_string()))
         }
     }
 }
@@ -147,7 +170,8 @@ impl Default for PackOptions<'_> {
             encoding: Encoding::default(),
             verbose: false,
             null_separated: false,
-            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
+            thread_count: NonZeroUsize::new(num_cpus::get())
+                .unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
 }
@@ -155,8 +179,10 @@ impl Default for PackOptions<'_> {
 pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions) -> Result<Pak> {
     let write_record_inline = match options.variant {
         Variant::ConanExiles => {
-            return Err(Error::new("Writing of Conan Exile paks is not supported.".to_string()).
-                with_path(pak_path));
+            return Err(
+                Error::new("Writing of Conan Exile paks is not supported.".to_string())
+                    .with_path(pak_path),
+            );
             // XXX: There a are 20 unknown bytes after the inline record information if compressed.
             //      That is 16 extra to the already 4 extra bytes in standard version >= 4.
             //      In the index record there are only 4 extra bytes that are always 0.
@@ -177,19 +203,24 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             // 5 => Record::write_v3_inline, // maybe?
             // 7 => Record::write_v3_inline, // maybe?
             _ => {
-                return Err(Error::new(
-                    format!("unsupported version: {}", options.version)).
-                    with_path(pak_path));
+                return Err(
+                    Error::new(format!("unsupported version: {}", options.version))
+                        .with_path(pak_path),
+                );
             }
-        }
+        },
     };
 
     match options.compression_method {
         self::COMPR_NONE | self::COMPR_ZLIB => {}
-        _ => return Err(Error::new(
-            format!("unsupported compression method: {} ({})",
-                compression_method_name(options.compression_method), options.compression_method)).
-            with_path(pak_path))
+        _ => {
+            return Err(Error::new(format!(
+                "unsupported compression method: {} ({})",
+                compression_method_name(options.compression_method),
+                options.compression_method
+            ))
+            .with_path(pak_path))
+        }
     }
 
     let pak_path = pak_path.as_ref();
@@ -197,10 +228,11 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         .create(true)
         .write(true)
         .truncate(true)
-        .open(pak_path) {
-            Ok(file) => file,
-            Err(error) => return Err(Error::io_with_path(error, pak_path))
-        };
+        .open(pak_path)
+    {
+        Ok(file) => file,
+        Err(error) => return Err(Error::io_with_path(error, pak_path)),
+    };
 
     let mut records = Vec::new();
     let mut buffer = Vec::with_capacity(BUFFER_SIZE);
@@ -237,24 +269,28 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             };
 
             if options.version < 2 && compression_method != COMPR_NONE {
-                return Err(Error::new("Compression is only supported startig with version 2".to_string())
-                    .with_path(&path.filename));
+                return Err(Error::new(
+                    "Compression is only supported startig with version 2".to_string(),
+                )
+                .with_path(&path.filename));
             }
 
             let source_path: PathBuf;
             let filename = if let Some(filename) = &path.rename {
                 source_path = (&path.filename).into();
-                parse_pak_path(&filename).collect::<Vec<_>>()
+                parse_pak_path(filename).collect::<Vec<_>>()
             } else {
                 #[cfg(target_os = "windows")]
-                let filename = path.filename
+                let filename = path
+                    .filename
                     .trim_end_matches(|ch| ch == '/' || ch == '\\')
                     .split(|ch| ch == '/' || ch == '\\')
                     .filter(|comp| !comp.is_empty())
                     .collect::<Vec<_>>();
 
                 #[cfg(not(target_os = "windows"))]
-                let filename = path.filename
+                let filename = path
+                    .filename
                     .trim_end_matches('/')
                     .split('/')
                     .filter(|comp| !comp.is_empty())
@@ -268,23 +304,28 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
             let metadata = match source_path.metadata() {
                 Ok(metadata) => metadata,
-                Err(error) => return Err(Error::io_with_path(error, source_path))
+                Err(error) => return Err(Error::io_with_path(error, source_path)),
             };
 
             let mut make_filename = |file_path: &Path| -> Result<String> {
-                let mut pak_filename: Vec<String> = filename.iter().map(|comp| comp.to_string()).collect();
+                let mut pak_filename: Vec<String> =
+                    filename.iter().map(|comp| comp.to_string()).collect();
 
-                pak_filename.extend(file_path
-                    .components()
-                    .skip(component_count)
-                    .map(|comp| comp.as_os_str().to_string_lossy().into_owned()));
+                pak_filename.extend(
+                    file_path
+                        .components()
+                        .skip(component_count)
+                        .map(|comp| comp.as_os_str().to_string_lossy().into_owned()),
+                );
 
                 let filename = make_pak_path(pak_filename.iter());
 
                 if let Some(other_path) = filenames.insert(filename.clone(), file_path.to_owned()) {
-                    return Err(Error::new(
-                        format!("{}: filename not unique in archive, other path: {:?}", filename, other_path)
-                    ).with_path(file_path));
+                    return Err(Error::new(format!(
+                        "{}: filename not unique in archive, other path: {:?}",
+                        filename, other_path
+                    ))
+                    .with_path(file_path));
                 }
 
                 Ok(filename)
@@ -293,12 +334,12 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             if metadata.is_dir() {
                 let iter = match walkdir(&source_path) {
                     Ok(iter) => iter,
-                    Err(error) => return Err(Error::io_with_path(error, source_path))
+                    Err(error) => return Err(Error::io_with_path(error, source_path)),
                 };
                 for entry in iter {
                     let entry = match entry {
                         Ok(entry) => entry,
-                        Err(error) => return Err(Error::io_with_path(error, source_path))
+                        Err(error) => return Err(Error::io_with_path(error, source_path)),
                     };
                     let file_path = entry.path();
                     let filename = make_filename(&file_path)?;
@@ -309,8 +350,9 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                         compression_method,
                     }) {
                         Ok(()) => {}
-                        Err(error) =>
+                        Err(error) => {
                             return Err(Error::new(error.to_string()).with_path(entry.path()))
+                        }
                     }
                 }
             } else {
@@ -323,8 +365,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
                     compression_method,
                 }) {
                     Ok(()) => {}
-                    Err(error) =>
-                        return Err(Error::new(error.to_string()).with_path(source_path))
+                    Err(error) => return Err(Error::new(error.to_string()).with_path(source_path)),
                 }
             }
         }
@@ -362,7 +403,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         Err(error) => {
             return Err(Error::new(format!("threading error: {:?}", error)).with_path(pak_path));
         }
-        Ok(result) => result?
+        Ok(result) => result?,
     }
 
     let index_offset = data_size;
@@ -373,7 +414,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
 
     let mount_pount = options.mount_point.unwrap_or("");
 
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
 
     buffer.clear();
 
@@ -389,8 +430,9 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             if options.version != 4 {
                 return Err(Error::new(format!(
                     "Only know how to handle Conan Exile paks of version 4, but version was {}.",
-                    options.version)).
-                    with_path(pak_path));
+                    options.version
+                ))
+                .with_path(pak_path));
             }
             Record::write_conan_exiles
         }
@@ -403,11 +445,12 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             // 5 => Record::write_v3, // maybe?
             // 7 => Record::write_v3, // maybe?
             _ => {
-                return Err(Error::new(
-                    format!("unsupported version: {}", options.version)).
-                    with_path(pak_path));
+                return Err(
+                    Error::new(format!("unsupported version: {}", options.version))
+                        .with_path(pak_path),
+                );
             }
-        }
+        },
     };
 
     for record in &records {
@@ -420,9 +463,10 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
         index_size += buffer.len() as u64;
     }
 
-    let index_sha1: Sha1 = hasher.finish();
+    let index_sha1: Sha1 = hasher.digest().bytes();
 
-    encode!(&mut writer,
+    encode!(
+        &mut writer,
         PAK_MAGIC,
         options.version,
         index_offset,
@@ -431,12 +475,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
     );
     writer.flush()?;
 
-    let index = Index::new(
-        options
-            .mount_point
-            .map(str::to_string),
-        records,
-    );
+    let index = Index::new(options.mount_point.map(str::to_string), records);
 
     Ok(Pak::new(
         options.variant,
@@ -511,8 +550,15 @@ struct Work<'a> {
 }
 
 #[inline]
-fn write_uncompressed(data: &mut Vec<u8>, header_buffer: &mut Vec<u8>, base_header_size: u64, in_file: &mut File, uncompressed_size: u64, buffer: &mut Vec<u8>) -> Result<Sha1> {
-    let mut hasher = OpenSSLSha1::new();
+fn write_uncompressed(
+    data: &mut Vec<u8>,
+    header_buffer: &mut [u8],
+    base_header_size: u64,
+    in_file: &mut File,
+    uncompressed_size: u64,
+    buffer: &mut Vec<u8>,
+) -> Result<Sha1> {
+    let mut hasher = sha1_smol::Sha1::new();
 
     data.write_all(&header_buffer[..base_header_size as usize])?;
 
@@ -539,10 +585,14 @@ fn write_uncompressed(data: &mut Vec<u8>, header_buffer: &mut Vec<u8>, base_head
         hasher.update(buffer);
     }
 
-    Ok(hasher.finish())
+    Ok(hasher.digest().bytes())
 }
 
-fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_channel: Sender<Result<(Record, Vec<u8>)>>) -> Result<()> {
+fn worker_proc(
+    options: &PackOptions,
+    work_channel: Receiver<Work>,
+    result_channel: Sender<Result<(Record, Vec<u8>)>>,
+) -> Result<()> {
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let mut out_buffer = Vec::new();
 
@@ -554,7 +604,8 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             if options.version != 4 {
                 return Err(Error::new(format!(
                     "Only know how to handle Conan Exile paks of version 4, but version was {}.",
-                    options.version)));
+                    options.version
+                )));
             }
             CONAN_EXILE_RECORD_HEADER_SIZE
         }
@@ -568,11 +619,17 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             _ => {
                 panic!("unsupported version: {}", options.version)
             }
-        }
+        },
     };
     let mut header_buffer = vec![0u8; base_header_size as usize];
 
-    while let Ok(Work { filename, file_path, path, mut compression_method }) = work_channel.recv() {
+    while let Ok(Work {
+        filename,
+        file_path,
+        path,
+        mut compression_method,
+    }) = work_channel.recv()
+    {
         let mut data = Vec::new();
         let offset = 0;
         let compression_blocks;
@@ -627,10 +684,17 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
             self::COMPR_NONE => {
                 size = uncompressed_size;
                 compression_blocks = None;
-                sha1 = write_uncompressed(&mut data, &mut header_buffer, base_header_size, &mut in_file, uncompressed_size, &mut buffer)?;
+                sha1 = write_uncompressed(
+                    &mut data,
+                    &mut header_buffer,
+                    base_header_size,
+                    &mut in_file,
+                    uncompressed_size,
+                    &mut buffer,
+                )?;
             }
             self::COMPR_ZLIB => {
-                let mut hasher = OpenSSLSha1::new();
+                let mut hasher = sha1_smol::Sha1::new();
 
                 let compression_level = if let Some(compression_level) = path.compression_level {
                     Compression::new(compression_level.get())
@@ -650,7 +714,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                         out_buffer.clear();
                         let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                        zlib.write_all(&buffer)?;
+                        zlib.write_all(buffer)?;
                         zlib.finish()?;
                     }
 
@@ -665,15 +729,23 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         data.clear();
                         in_file.seek(SeekFrom::Start(0))?;
                         size = uncompressed_size;
-                        sha1 = write_uncompressed(&mut data, &mut header_buffer, base_header_size, &mut in_file, uncompressed_size, &mut buffer)?;
+                        sha1 = write_uncompressed(
+                            &mut data,
+                            &mut header_buffer,
+                            base_header_size,
+                            &mut in_file,
+                            uncompressed_size,
+                            &mut buffer,
+                        )?;
                     } else {
                         data.write_all(&out_buffer)?;
                         hasher.update(&out_buffer);
-                        sha1 = hasher.finish();
+                        sha1 = hasher.digest().bytes();
                     }
                 } else {
                     size = 0u64;
-                    compression_block_size = path.compression_block_size
+                    compression_block_size = path
+                        .compression_block_size
                         .unwrap_or(options.compression_block_size)
                         .get();
 
@@ -683,7 +755,9 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                     let mut header_size = base_header_size + 4;
                     if uncompressed_size > 0 {
-                        header_size += (1 + ((uncompressed_size - 1) / compression_block_size as u64)) * COMPRESSION_BLOCK_HEADER_SIZE;
+                        header_size += (1
+                            + ((uncompressed_size - 1) / compression_block_size as u64))
+                            * COMPRESSION_BLOCK_HEADER_SIZE;
                     }
                     if header_buffer.len() < header_size as usize {
                         header_buffer.resize(header_size as usize, 0);
@@ -705,7 +779,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                             out_buffer.clear();
                             let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                            zlib.write_all(&buffer)?;
+                            zlib.write_all(buffer)?;
                             zlib.finish()?;
                             data.write_all(&out_buffer)?;
                             hasher.update(&out_buffer);
@@ -744,7 +818,9 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         }
                     }
 
-                    if size + blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE as u64 >= uncompressed_size {
+                    if size + blocks.len() as u64 * COMPRESSION_BLOCK_HEADER_SIZE as u64
+                        >= uncompressed_size
+                    {
                         // compressed actually bigger (or same size),
                         // so revert what we did and use uncompressed instead
 
@@ -753,17 +829,27 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
                         in_file.seek(SeekFrom::Start(0))?;
                         size = uncompressed_size;
                         compression_blocks = None;
-                        sha1 = write_uncompressed(&mut data, &mut header_buffer, base_header_size, &mut in_file, uncompressed_size, &mut buffer)?;
+                        sha1 = write_uncompressed(
+                            &mut data,
+                            &mut header_buffer,
+                            base_header_size,
+                            &mut in_file,
+                            uncompressed_size,
+                            &mut buffer,
+                        )?;
                     } else {
                         compression_blocks = Some(blocks);
-                        sha1 = hasher.finish();
+                        sha1 = hasher.digest().bytes();
                     }
                 }
             }
             _ => {
-                result_channel.send(Err(Error::new(
-                    format!("{}: unsupported compression method: {} ({})",
-                        path.filename, compression_method_name(compression_method), compression_method))))?;
+                result_channel.send(Err(Error::new(format!(
+                    "{}: unsupported compression method: {} ({})",
+                    path.filename,
+                    compression_method_name(compression_method),
+                    compression_method
+                ))))?;
                 break;
             }
         }

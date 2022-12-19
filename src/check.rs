@@ -4,14 +4,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashSet, fs::File, io::{BufReader, Read, Seek, SeekFrom, stderr}, num::NonZeroUsize};
+use std::{
+    collections::HashSet,
+    fs::File,
+    io::{stderr, BufReader, Read, Seek, SeekFrom},
+    num::NonZeroUsize,
+};
 
-use crossbeam_channel::{Sender, unbounded};
+use crossbeam_channel::{unbounded, Sender};
 use crossbeam_utils::thread;
-use openssl::sha::Sha1 as OpenSSLSha1;
 
-use crate::{Error, Filter, Pak, pak::{BUFFER_SIZE, COMPR_METHODS, COMPR_NONE, HexDisplay, Sha1, Variant}};
 use crate::reopen::Reopen;
+use crate::{
+    pak::{HexDisplay, Sha1, Variant, BUFFER_SIZE, COMPR_METHODS, COMPR_NONE},
+    Error, Filter, Pak,
+};
 use crate::{Record, Result};
 
 pub const NULL_SHA1: Sha1 = [0u8; 20];
@@ -36,25 +43,24 @@ impl Default for CheckOptions<'_> {
             null_separated: false,
             verbose: false,
             paths: None,
-            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
+            thread_count: NonZeroUsize::new(num_cpus::get())
+                .unwrap_or(NonZeroUsize::new(1).unwrap()),
         }
     }
 }
 
 macro_rules! check_error {
-    ($ok:expr, $result_sender:expr, $abort_on_error:expr, $error:expr) => {
-        {
-            if let Err(_) = $result_sender.send(Err($error)) {
-                return;
-            }
-
-            if $abort_on_error {
-                return;
-            }
-
-            $ok = false;
+    ($ok:expr, $result_sender:expr, $abort_on_error:expr, $error:expr) => {{
+        if let Err(_) = $result_sender.send(Err($error)) {
+            return;
         }
-    };
+
+        if $abort_on_error {
+            return;
+        }
+
+        $ok = false;
+    }};
 }
 
 macro_rules! io {
@@ -69,40 +75,51 @@ macro_rules! io {
     };
 }
 
-fn check_data<R>(reader: &mut R, filename: &str, offset: u64, size: u64, checksum: &Sha1, ignore_null_checksums: bool, buffer: &mut Vec<u8>) -> Result<()>
-where R: Read, R: Seek {
+fn check_data<R>(
+    reader: &mut R,
+    filename: &str,
+    offset: u64,
+    size: u64,
+    checksum: &Sha1,
+    ignore_null_checksums: bool,
+    buffer: &mut Vec<u8>,
+) -> Result<()>
+where
+    R: Read,
+    R: Seek,
+{
     if ignore_null_checksums && checksum == &NULL_SHA1 {
         return Ok(());
     }
     reader.seek(SeekFrom::Start(offset))?;
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
     let mut remaining = size;
     buffer.resize(BUFFER_SIZE, 0);
     loop {
         if remaining >= BUFFER_SIZE as u64 {
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             remaining -= BUFFER_SIZE as u64;
         } else {
             let buffer = &mut buffer[..remaining as usize];
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             break;
         }
     }
-    let actual_digest = hasher.finish();
+    let actual_digest = hasher.digest().bytes();
     if &actual_digest != checksum {
         return Err(Error::new(format!(
             "checksum missmatch:\n\
              \texpected: {}\n\
              \tactual:   {}",
-             HexDisplay::new(checksum),
-             HexDisplay::new(&actual_digest)
-        )).with_path(filename));
+            HexDisplay::new(checksum),
+            HexDisplay::new(&actual_digest)
+        ))
+        .with_path(filename));
     }
     Ok(())
 }
-
 
 pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Result<usize> {
     let CheckOptions {
@@ -121,7 +138,15 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
     let mut filter: Option<Filter> = paths.map(|paths| paths.into());
     let mut stderr = stderr();
 
-    if let Err(error) = check_data(&mut BufReader::new(in_file), "<archive index>", index_offset, pak.index_size(), pak.index_sha1(), ignore_null_checksums, &mut vec![0u8; BUFFER_SIZE]) {
+    if let Err(error) = check_data(
+        &mut BufReader::new(in_file),
+        "<archive index>",
+        index_offset,
+        pak.index_size(),
+        pak.index_sha1(),
+        ignore_null_checksums,
+        &mut vec![0u8; BUFFER_SIZE],
+    ) {
         error_count += 1;
         if abort_on_error {
             return Err(error);
@@ -133,7 +158,10 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
     let read_record = match variant {
         Variant::ConanExiles => {
             if version != 4 {
-                return Err(Error::new(format!("Only know how to handle Conan Exile paks of version 4, but version was {}.", version)));
+                return Err(Error::new(format!(
+                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                    version
+                )));
             }
             Record::read_conan_exiles
         }
@@ -144,7 +172,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
             _ => {
                 return Err(Error::new(format!("unsupported version: {}", version)));
             }
-        }
+        },
     };
 
     let thread_result = thread::scope::<_, Result<usize>>(|scope| {
@@ -222,7 +250,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                     if let Some(blocks) = record.compression_blocks() {
                         if !ignore_null_checksums || record.sha1().map_or(true, |sha1| sha1 != NULL_SHA1) {
                             let header_size = Pak::header_size(version, variant, record);
-                            let mut hasher = OpenSSLSha1::new();
+                            let mut hasher = sha1_smol::Sha1::new();
 
                             let base_offset;
                             let mut next_start_offset;
@@ -285,7 +313,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
                                     )).with_path(record.filename()));
                             }
 
-                            let actual_digest = hasher.finish();
+                            let actual_digest = hasher.digest().bytes();
                             if &actual_digest != record.sha1().as_ref().unwrap_or(&NULL_SHA1) {
                                 check_error!(ok, result_sender, abort_on_error, Error::new(format!(
                                     "checksum missmatch:\n\
@@ -312,13 +340,20 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
         drop(result_sender);
 
         if let Some(filter) = &mut filter {
-            let records = pak.index().records()
+            let records = pak
+                .index()
+                .records()
                 .iter()
                 .filter(|&record| filter.visit(record.filename()));
 
             error_count += enqueue(records, work_sender, abort_on_error, null_separated)?;
         } else {
-            error_count += enqueue(pak.index().records().iter(), work_sender, abort_on_error, null_separated)?;
+            error_count += enqueue(
+                pak.index().records().iter(),
+                work_sender,
+                abort_on_error,
+                null_separated,
+            )?;
         }
 
         let linesep = if options.null_separated { '\0' } else { '\n' };
@@ -365,18 +400,22 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
         Err(error) => {
             return Err(Error::new(format!("threading error: {:?}", error)));
         }
-        Ok(result) => result
+        Ok(result) => result,
     }
 }
 
-fn enqueue<'a>(records: impl std::iter::Iterator<Item=&'a Record>, work_sender: Sender<&'a Record>, abort_on_error: bool, null_separated: bool) -> Result<usize> {
+fn enqueue<'a>(
+    records: impl std::iter::Iterator<Item = &'a Record>,
+    work_sender: Sender<&'a Record>,
+    abort_on_error: bool,
+    null_separated: bool,
+) -> Result<usize> {
     let mut filenames: HashSet<&str> = HashSet::new();
     let mut error_count = 0usize;
     for record in records {
         if !filenames.insert(record.filename()) {
-            let error = Error::new(
-                "filename not unique in archive".to_string()
-            ).with_path(record.filename());
+            let error = Error::new("filename not unique in archive".to_string())
+                .with_path(record.filename());
 
             error_count += 1;
             if abort_on_error {

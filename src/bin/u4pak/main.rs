@@ -4,7 +4,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clap::{App, AppSettings, Arg, ArgMatches, SubCommand, crate_version, crate_authors};
+use clap::{crate_authors, crate_version, App, AppSettings, Arg, ArgMatches, SubCommand};
 use terminal_size::{terminal_size, Width};
 
 use env_logger::Env;
@@ -872,8 +872,7 @@ fn run(matches: &ArgMatches) -> Result<()> {
                         "--compression-block-size cannot be 0".to_string(),
                     ));
                 };
-            let compression_min_size =
-                parse_size(args.value_of("compression-min-size").unwrap())?;
+            let compression_min_size = parse_size(args.value_of("compression-min-size").unwrap())?;
             if compression_min_size > u64::MAX as usize {
                 return Err(Error::new(format!(
                     "--compression-min-size too big: {}",

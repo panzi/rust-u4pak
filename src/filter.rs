@@ -36,7 +36,9 @@ impl<'a> Filter<'a> {
     }
 
     pub fn from_paths<I>(paths: I) -> Self
-    where I: std::iter::Iterator<Item=&'a str> {
+    where
+        I: std::iter::Iterator<Item = &'a str>,
+    {
         let mut filter = Self {
             nodes: std::collections::HashMap::<&'a str, Filter<'a>>::new(),
             included: false,
@@ -56,7 +58,9 @@ impl<'a> Filter<'a> {
     }
 
     pub fn insert_iter<I>(&mut self, mut path: I)
-    where I: std::iter::Iterator<Item=&'a str> {
+    where
+        I: std::iter::Iterator<Item = &'a str>,
+    {
         if let Some(name) = path.next() {
             if name.is_empty() {
                 self.insert_iter(path);
@@ -74,11 +78,18 @@ impl<'a> Filter<'a> {
 
     #[inline]
     pub fn contains(&self, path: impl AsRef<str>) -> bool {
-        self.contains_iter(path.as_ref().trim_matches('/').split('/').filter(|comp| !comp.is_empty()))
+        self.contains_iter(
+            path.as_ref()
+                .trim_matches('/')
+                .split('/')
+                .filter(|comp| !comp.is_empty()),
+        )
     }
 
     pub fn contains_iter<'b, I>(&self, mut path: I) -> bool
-    where I: std::iter::Iterator<Item=&'b str> {
+    where
+        I: std::iter::Iterator<Item = &'b str>,
+    {
         if self.included {
             true
         } else if let Some(name) = path.next() {
@@ -94,11 +105,18 @@ impl<'a> Filter<'a> {
 
     #[inline]
     pub fn visit(&mut self, path: impl AsRef<str>) -> bool {
-        self.visit_iter(path.as_ref().trim_matches('/').split('/').filter(|comp| !comp.is_empty()))
+        self.visit_iter(
+            path.as_ref()
+                .trim_matches('/')
+                .split('/')
+                .filter(|comp| !comp.is_empty()),
+        )
     }
 
     pub fn visit_iter<'b, I>(&mut self, mut path: I) -> bool
-    where I: std::iter::Iterator<Item=&'b str> {
+    where
+        I: std::iter::Iterator<Item = &'b str>,
+    {
         if self.included {
             self.visited = true;
             if let Some(name) = path.next() {
@@ -133,13 +151,27 @@ impl<'a> Filter<'a> {
     }
 
     #[inline]
-    pub fn visited_paths(&'a self) -> Map<std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>, impl FnMut((&'a Filter<'a>, String)) -> String> {
-        self.iter().filter(|&(filter, _)| filter.visited).map(|(_, path)| path)
+    pub fn visited_paths(
+        &'a self,
+    ) -> Map<
+        std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>,
+        impl FnMut((&'a Filter<'a>, String)) -> String,
+    > {
+        self.iter()
+            .filter(|&(filter, _)| filter.visited)
+            .map(|(_, path)| path)
     }
 
     #[inline]
-    pub fn non_visited_paths(&'a self) -> Map<std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>, impl FnMut((&'a Filter<'a>, String)) -> String> {
-        self.iter().filter(|&(filter, _)| !filter.visited).map(|(_, path)| path)
+    pub fn non_visited_paths(
+        &'a self,
+    ) -> Map<
+        std::iter::Filter<FilterIter<'_>, impl FnMut(&(&'a Filter<'a>, String)) -> bool>,
+        impl FnMut((&'a Filter<'a>, String)) -> String,
+    > {
+        self.iter()
+            .filter(|&(filter, _)| !filter.visited)
+            .map(|(_, path)| path)
     }
 
     pub fn assert_all_visited(&self) -> Result<()> {
@@ -164,7 +196,11 @@ impl<'a> Filter<'a> {
 
 #[derive(Debug)]
 pub struct FilterIter<'a> {
-    stack: Vec<(&'a Filter<'a>, std::collections::hash_map::Iter<'a, &'a str, Filter<'a>>, usize)>,
+    stack: Vec<(
+        &'a Filter<'a>,
+        std::collections::hash_map::Iter<'a, &'a str, Filter<'a>>,
+        usize,
+    )>,
     buffer: String,
 }
 

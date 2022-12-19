@@ -1,37 +1,40 @@
 [package]
 name = "u4pak"
 version = "1.4.0"
-authors = ["Mathias Panzenböck <grosser.meister.morti@gmx.net>", "L. Sprengel <l.sprengel@pm.me>"]
+authors = [
+    "Mathias Panzenböck <grosser.meister.morti@gmx.net>",
+    "L. Sprengel <l.sprengel@pm.me>",
+]
 edition = "2018"
 license-file = "LICENSE.txt"
 
 [[bin]]
-name="u4pak"
-path="src/bin/u4pak/main.rs"
+name = "u4pak"
+path = "src/bin/u4pak/main.rs"
 
 [lib]
-name="u4pak"
-path="src/lib.rs"
+name = "u4pak"
+path = "src/lib.rs"
 
 [dependencies]
 clap = "2.34"
 chrono = "0.4"
-flate2 = "1.0.22"
-#flate2 = { version = "1.0.20", features = ["zlib"], default-features = false }
+flate2 = "1.0"
 crossbeam-channel = "0.5"
 crossbeam-utils = "0.8"
-num_cpus = "1.13.1"
+num_cpus = "1.13"
 # OpenSSL's SHA-1 implementation is much faster than the one in rust-crypto
-openssl = { version = "0.10", features = ["vendored"] }
-terminal_size = "0.1.17"
-aes = "0.7.5"
-base64 = "0.13.0"
+sha1_smol = "1.0"
+terminal_size = "0.2"
+aes = "0.8"
+base64 = "0.20"
 log = "0.4"
-env_logger = "0.9.0"
+env_logger = "0.10"
+walkdir = "2.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # for sendfile() and fuse support
-libc = "0.2.113"
+libc = "0.2"
 
 # FUSE might work on other OSes too (like macOS and BSD), but I don't use
 # anything other than Linux (testing Windows binaries through wine).
@@ -39,4 +42,4 @@ libc = "0.2.113"
 # "fuse". Is that a wise choice?
 cntr-fuse = { version = "0.4" }
 
-daemonize = { version = "0.4.1" }
+daemonize = { version = "0.4" }

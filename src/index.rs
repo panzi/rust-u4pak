@@ -10,9 +10,9 @@ use crate::decrypt::decrypt;
 use crate::Variant;
 use crate::{Error, Record, Result};
 
+use log::{debug, error, trace, warn};
 use std::convert::TryFrom;
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use log::{debug, error, trace, warn};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Encoding {
@@ -105,7 +105,7 @@ impl Index {
         variant: Variant,
         encoding: Encoding,
         encryption_key: Option<Vec<u8>>,
-    ) -> Result<Self> 
+    ) -> Result<Self>
     where
         R: Read,
         R: Seek,
@@ -113,7 +113,7 @@ impl Index {
         let mut index_buff = vec![0; index_size as usize];
         reader.read_exact(&mut index_buff)?;
         if let Some(encryption_key) = &encryption_key {
-            decrypt(&mut index_buff, &encryption_key);
+            decrypt(&mut index_buff, encryption_key);
         }
 
         let decrypted_index = &mut Cursor::new(index_buff);
@@ -123,23 +123,27 @@ impl Index {
         if version < 10 {
             records = read_records_legacy(decrypted_index, version, variant, encoding)
                 .expect("Failed to read index records");
-        } else {
-            if let Ok((index_info, mut r)) = read_records(decrypted_index, encoding) {
-                if let Ok(mut sec_records) = read_secondary_index_records(reader, &index_info, encryption_key, encoding) {
-                    r.append(&mut sec_records);
-                }
-
-                records = r;
-            } else {
-                return Err(Error::new(format!(
-                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
-                    version
-                )));
+        } else if let Ok((index_info, mut r)) = read_records(decrypted_index, encoding) {
+            if let Ok(mut sec_records) =
+                read_secondary_index_records(reader, &index_info, encryption_key, encoding)
+            {
+                r.append(&mut sec_records);
             }
+
+            records = r;
+        } else {
+            return Err(Error::new(format!(
+                "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                version
+            )));
         };
 
         Ok(Self {
-            mount_point: if mount_point.is_empty() { None } else { Some(mount_point) },
+            mount_point: if mount_point.is_empty() {
+                None
+            } else {
+                Some(mount_point)
+            },
             records,
         })
     }
@@ -148,7 +152,7 @@ impl Index {
     pub fn mount_point(&self) -> Option<&str> {
         match &self.mount_point {
             Some(mount_point) => Some(mount_point),
-            None => None
+            None => None,
         }
     }
 
@@ -158,7 +162,7 @@ impl Index {
     }
 
     #[inline]
-    pub fn into_records<'a>(self) -> Vec<Record> {
+    pub fn into_records(self) -> Vec<Record> {
         self.records
     }
 }
@@ -248,7 +252,6 @@ pub fn read_records(
     );
 
     let mut secondary_index_info = SecondaryIndexInfo::default();
-    secondary_index_info.has_path_hash_index = has_path_hash_index != 0;
 
     if secondary_index_info.has_path_hash_index {
         decode!(
@@ -296,8 +299,9 @@ fn read_secondary_index_records<R>(
     reader: &mut R,
     index_info: &SecondaryIndexInfo,
     encryption_key: Option<Vec<u8>>,
-    encoding: Encoding
-) -> Result<Vec<Record>> where
+    encoding: Encoding,
+) -> Result<Vec<Record>>
+where
     R: Read,
     R: Seek,
 {
@@ -356,19 +360,22 @@ fn read_secondary_index_records<R>(
                         warn!("Failed to read record for file {}. Skipping.", p);
                     }
                 } else {
-                    warn!("Failed to resolve name for file {} in folder {}. Skipping.", i, file_path);
+                    warn!(
+                        "Failed to resolve name for file {} in folder {}. Skipping.",
+                        i, file_path
+                    );
                     continue;
                 }
             }
         }
     } else if index_info.has_path_hash_index {
         warn!("Hash index is used as no full directory index was found. Filenames and paths can not be restored using this index!");
-        debug!("Reading path hash index from {} with size {}", index_info.path_hash_index_offset, index_info.path_hash_index_size);
-        let mut path_hash_index_data =
-            vec![0u8; index_info.path_hash_index_size as usize];
-        if let Err(err) = reader.seek(SeekFrom::Start(
-            index_info.path_hash_index_offset as u64,
-        )) {
+        debug!(
+            "Reading path hash index from {} with size {}",
+            index_info.path_hash_index_offset, index_info.path_hash_index_size
+        );
+        let mut path_hash_index_data = vec![0u8; index_info.path_hash_index_size as usize];
+        if let Err(err) = reader.seek(SeekFrom::Start(index_info.path_hash_index_offset as u64)) {
             error!("Failed to load fill directory index: {}", err);
             return Err(Error::from(err));
         }
@@ -389,7 +396,9 @@ fn read_secondary_index_records<R>(
 
             encoded_record_info.seek(SeekFrom::Start(entry as u64))?;
             trace!("Decoding file {:x} from location {}", hash, entry);
-            if let Ok(record) = Record::decode_entry(&mut encoded_record_info, format!("{:x}", hash)) {
+            if let Ok(record) =
+                Record::decode_entry(&mut encoded_record_info, format!("{:x}", hash))
+            {
                 records.push(record);
             } else {
                 warn!("Failed to read record for file {:x}. Skipping.", hash);

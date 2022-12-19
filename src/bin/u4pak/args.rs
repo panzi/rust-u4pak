@@ -20,24 +20,31 @@ enum ParseState {
 fn parser_error(source: &[u8], index: usize, message: impl Display) -> Error {
     let prefix = &source[0..index];
     let lineno = prefix.iter().copied().filter(|&byte| byte == b'\n').count() + 1;
-    let line_start = if let Some(line_start) = prefix.iter().copied()
-            .rposition(|byte| byte == b'\n') {
-        line_start + 1
-    } else {
-        0
-    };
+    let line_start =
+        if let Some(line_start) = prefix.iter().copied().rposition(|byte| byte == b'\n') {
+            line_start + 1
+        } else {
+            0
+        };
     let column = String::from_utf8_lossy(&prefix[line_start..]).len() + 1;
 
-    let line_end = index + if let Some(line_end) = (&source[index..]).iter().copied()
-            .position(|byte| byte == b'\n') {
-        line_end
-    } else {
-        source.len()
-    };
+    let line_end = index
+        + if let Some(line_end) = (source[index..])
+            .iter()
+            .copied()
+            .position(|byte| byte == b'\n')
+        {
+            line_end
+        } else {
+            source.len()
+        };
 
     let line = String::from_utf8_lossy(&source[line_start..line_end]);
     let lineno_str = format!("{}: ", lineno);
-    let mut message = format!("{}:{}: {}\n{}{}\n", lineno, column, message, lineno_str, line);
+    let mut message = format!(
+        "{}:{}: {}\n{}{}\n",
+        lineno, column, message, lineno_str, line
+    );
 
     for _ in 0..lineno_str.len() {
         message.push(' ');
@@ -62,22 +69,20 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
 
     for (index, &byte) in source.iter().enumerate() {
         match state {
-            ParseState::Space => {
-                match byte {
-                    b'"' => {
-                        start_index = index + 1;
-                        state = ParseState::QuotedString;
-                    }
-                    b'#' => {
-                        state = ParseState::Comment;
-                    }
-                    _ if byte.is_ascii_whitespace() => {}
-                    _ => {
-                        start_index = index;
-                        state = ParseState::PlainString;
-                    }
+            ParseState::Space => match byte {
+                b'"' => {
+                    start_index = index + 1;
+                    state = ParseState::QuotedString;
                 }
-            }
+                b'#' => {
+                    state = ParseState::Comment;
+                }
+                _ if byte.is_ascii_whitespace() => {}
+                _ => {
+                    start_index = index;
+                    state = ParseState::PlainString;
+                }
+            },
             ParseState::Comment => {
                 if byte == b'\n' {
                     state = ParseState::Space;
@@ -88,7 +93,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
                     let value = match std::str::from_utf8(&source[start_index..index]) {
                         Ok(value) => value,
                         Err(error) => {
-                            return Err(parser_error(source, start_index + error.valid_up_to(), &error));
+                            return Err(parser_error(
+                                source,
+                                start_index + error.valid_up_to(),
+                                error,
+                            ));
                         }
                     };
                     buffer.push_str(value);
@@ -99,7 +108,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
                     let value = match std::str::from_utf8(&source[start_index..index]) {
                         Ok(value) => value,
                         Err(error) => {
-                            return Err(parser_error(source, start_index + error.valid_up_to(), &error));
+                            return Err(parser_error(
+                                source,
+                                start_index + error.valid_up_to(),
+                                error,
+                            ));
                         }
                     };
                     buffer.push_str(value);
@@ -121,7 +134,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
                     let value = match std::str::from_utf8(&source[start_index..index - 1]) {
                         Ok(value) => value,
                         Err(error) => {
-                            return Err(parser_error(source, start_index + error.valid_up_to(), &error));
+                            return Err(parser_error(
+                                source,
+                                start_index + error.valid_up_to(),
+                                error,
+                            ));
                         }
                     };
                     buffer.push_str(value);
@@ -132,7 +149,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
                     let value = match std::str::from_utf8(&source[start_index..index - 1]) {
                         Ok(value) => value,
                         Err(error) => {
-                            return Err(parser_error(source, start_index + error.valid_up_to(), &error));
+                            return Err(parser_error(
+                                source,
+                                start_index + error.valid_up_to(),
+                                error,
+                            ));
                         }
                     };
                     buffer.push_str(value);
@@ -149,7 +170,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
             let value = match std::str::from_utf8(&source[start_index..]) {
                 Ok(value) => value,
                 Err(error) => {
-                    return Err(parser_error(source, start_index + error.valid_up_to(), error));
+                    return Err(parser_error(
+                        source,
+                        start_index + error.valid_up_to(),
+                        error,
+                    ));
                 }
             };
             buffer.push_str(value);
@@ -167,7 +192,11 @@ pub fn parse_arg_file(bin_name: String, source: &[u8]) -> Result<Vec<String>> {
             let value = match std::str::from_utf8(&source[start_index..source.len() - 1]) {
                 Ok(value) => value,
                 Err(error) => {
-                    return Err(parser_error(source, start_index + error.valid_up_to(), &error));
+                    return Err(parser_error(
+                        source,
+                        start_index + error.valid_up_to(),
+                        error,
+                    ));
                 }
             };
             buffer.push_str(value);
@@ -196,7 +225,12 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
             if ext.eq_ignore_ascii_case("u4pak") {
                 arg
             } else if ext.eq_ignore_ascii_case("pak") {
-                return Ok(Some(vec![bin_name, "info".to_string(), "-h".to_string(), arg]));
+                return Ok(Some(vec![
+                    bin_name,
+                    "info".to_string(),
+                    "-h".to_string(),
+                    arg,
+                ]));
             } else {
                 return Ok(None);
             }
@@ -210,12 +244,12 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
     let path = PathBuf::from(path);
     let mut file = match File::open(&path) {
         Ok(file) => file,
-        Err(error) => return Err(Error::io_with_path(error, path))
+        Err(error) => return Err(Error::io_with_path(error, path)),
     };
     let mut source = Vec::new();
     match file.read_to_end(&mut source) {
         Ok(_) => {}
-        Err(error) => return Err(Error::io_with_path(error, path))
+        Err(error) => return Err(Error::io_with_path(error, path)),
     }
 
     match parse_arg_file(bin_name, &source) {
@@ -229,7 +263,7 @@ pub fn get_args_from_file() -> Result<Option<Vec<String>>> {
                 }
             }
             Ok(Some(args))
-        },
-        Err(error) => Err(error.with_path(path))
+        }
+        Err(error) => Err(error.with_path(path)),
     }
 }

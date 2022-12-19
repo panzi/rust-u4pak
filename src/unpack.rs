@@ -4,22 +4,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fs::OpenOptions, io::{BufWriter, Read, Seek, SeekFrom, Write}, num::NonZeroUsize, path::{Path, PathBuf}};
 use std::fs::File;
+use std::{
+    fs::OpenOptions,
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use super::BLOCK_SIZE;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
-use aes::BLOCK_SIZE;
 
-use crate::util::align;
 use crate::decrypt::decrypt;
+use crate::util::align;
 
-use crate::{Error, Result, Pak, pak::{self, COMPR_NONE, PAK_RELATIVE_COMPRESSION_OFFSET_VERSION, Variant, compression_method_name}, util::parse_pak_path};
-use crate::Record;
-use crate::Filter;
 use crate::reopen::Reopen;
-use log::{debug};
+use crate::Filter;
+use crate::Record;
+use crate::{
+    pak::{
+        self, compression_method_name, Variant, COMPR_NONE, PAK_RELATIVE_COMPRESSION_OFFSET_VERSION,
+    },
+    util::parse_pak_path,
+    Error, Pak, Result,
+};
+use log::debug;
 
 #[derive(Debug)]
 pub struct UnpackOptions<'a> {
@@ -38,14 +49,21 @@ impl Default for UnpackOptions<'_> {
             verbose: false,
             null_separated: false,
             paths: None,
-            thread_count: NonZeroUsize::new(num_cpus::get()).unwrap_or(NonZeroUsize::new(1).unwrap()),
+            thread_count: NonZeroUsize::new(num_cpus::get())
+                .unwrap_or(NonZeroUsize::new(1).unwrap()),
             encryption_key: None,
         }
     }
 }
 
 #[inline]
-fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a UnpackOptions<'a>, records_iter: impl Iterator<Item=&'a Record>) -> Result<()> {
+fn unpack_iter<'a>(
+    pak: &Pak,
+    in_file: &mut File,
+    outdir: &Path,
+    options: &'a UnpackOptions<'a>,
+    records_iter: impl Iterator<Item = &'a Record>,
+) -> Result<()> {
     let version = pak.version();
     let variant = pak.variant();
 
@@ -74,7 +92,14 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 
             scope.spawn(move |_| {
                 let in_file = &mut in_file;
-                if let Err(error) = worker_proc(in_file, version, variant, options.encryption_key.clone(), work_receiver, result_sender) {
+                if let Err(error) = worker_proc(
+                    in_file,
+                    version,
+                    variant,
+                    options.encryption_key.clone(),
+                    work_receiver,
+                    result_sender,
+                ) {
                     if !error.error_type().is_channel_disconnected() {
                         eprintln!("error in worker thread: {}", error);
                     }
@@ -88,27 +113,33 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
         if let Some((zlib_outdir, none_outdir)) = &dirnames {
             for record in records_iter {
                 let method = record.compression_method();
-                let outdir = if method == COMPR_NONE { &none_outdir } else { &zlib_outdir };
+                let outdir = if method == COMPR_NONE {
+                    &none_outdir
+                } else {
+                    &zlib_outdir
+                };
 
                 match work_sender.send(Work { record, outdir }) {
                     Ok(()) => {}
-                    Err(error) =>
+                    Err(error) => {
                         return Err(Error::new(error.to_string()).with_path(record.filename()))
+                    }
                 }
             }
         } else {
             for record in records_iter {
                 match work_sender.send(Work { record, outdir }) {
                     Ok(()) => {}
-                    Err(error) =>
+                    Err(error) => {
                         return Err(Error::new(error.to_string()).with_path(record.filename()))
+                    }
                 }
             }
         }
 
         drop(work_sender);
 
-        #[cfg(target_family="unix")]
+        #[cfg(target_family = "unix")]
         let mut stdout = std::io::stdout();
 
         let linesep = if options.null_separated { '\0' } else { '\n' };
@@ -116,14 +147,14 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
         while let Ok(result) = result_receiver.recv() {
             let path = result?;
             if options.verbose {
-                #[cfg(target_family="unix")]
+                #[cfg(target_family = "unix")]
                 {
                     use std::os::unix::ffi::OsStrExt;
                     let _ = stdout.write_all(path.as_os_str().as_bytes());
                     let _ = stdout.write_all(&[linesep as u8]);
                 }
 
-                #[cfg(not(target_family="unix"))]
+                #[cfg(not(target_family = "unix"))]
                 {
                     print!("{}{}", path.to_string_lossy(), linesep);
                 }
@@ -136,19 +167,25 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
     });
 
     match thread_result {
-        Err(error) => {
-            return Err(Error::new(format!("threading error: {:?}", error)));
-        }
-        Ok(result) => result
+        Err(error) => Err(Error::new(format!("threading error: {:?}", error))),
+        Ok(result) => result,
     }
 }
 
-pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, options: UnpackOptions<'a>) -> Result<()> {
+pub fn unpack<'a>(
+    pak: &Pak,
+    in_file: &mut File,
+    outdir: impl AsRef<Path>,
+    options: UnpackOptions<'a>,
+) -> Result<()> {
     let outdir = outdir.as_ref();
 
     if let Some(paths) = options.paths {
         let mut filter: Filter = paths.into();
-        let records = pak.index().records().iter()
+        let records = pak
+            .index()
+            .records()
+            .iter()
             .filter(|record| filter.visit(record.filename()));
 
         unpack_iter(pak, in_file, outdir, &options, records)?;
@@ -159,19 +196,27 @@ pub fn unpack<'a>(pak: &Pak, in_file: &mut File, outdir: impl AsRef<Path>, optio
     Ok(())
 }
 
-pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &mut File, outdir: impl AsRef<Path>, encryption_key: Option<Vec<u8>>) -> Result<PathBuf> {
+pub fn unpack_record(
+    record: &Record,
+    version: u32,
+    variant: Variant,
+    in_file: &mut File,
+    outdir: impl AsRef<Path>,
+    encryption_key: Option<Vec<u8>>,
+) -> Result<PathBuf> {
     let header_size = pak::Pak::header_size(version, variant, record);
-    
+
     let mut path = outdir.as_ref().to_path_buf();
     for component in parse_pak_path(record.filename()) {
         path.push(component);
     }
-    
+
     let mut out_file = match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path) {
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+    {
         Ok(file) => file,
         Err(error) => {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -199,8 +244,13 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
 
     let mut in_buffer = vec![0u8; buffer_length];
     in_file.read_exact(&mut in_buffer)?;
-    
-    decrypt_entry(&mut in_buffer, record, encryption_key, record.size() as usize)?;
+
+    decrypt_entry(
+        &mut in_buffer,
+        record,
+        encryption_key,
+        record.size() as usize,
+    )?;
     debug!("unpacking {:?}", record);
 
     match record.compression_method() {
@@ -241,9 +291,10 @@ pub fn unpack_record(record: &Record, version: u32, variant: Variant, in_file: &
         }
         _ => {
             return Err(Error::new(format!(
-                    "unsupported compression method: {}",
-                    compression_method_name(record.compression_method())))
-                .with_path(record.filename()));
+                "unsupported compression method: {}",
+                compression_method_name(record.compression_method())
+            ))
+            .with_path(record.filename()));
         }
     }
 
@@ -256,11 +307,24 @@ struct Work<'a> {
     outdir: &'a Path,
 }
 
-fn worker_proc(in_file: &mut File, version: u32, variant: Variant, encryption_key: Option<Vec<u8>>, work_channel: Receiver<Work>, result_channel: Sender<Result<PathBuf>>) -> Result<()> {
+fn worker_proc(
+    in_file: &mut File,
+    version: u32,
+    variant: Variant,
+    encryption_key: Option<Vec<u8>>,
+    work_channel: Receiver<Work>,
+    result_channel: Sender<Result<PathBuf>>,
+) -> Result<()> {
     while let Ok(Work { record, outdir }) = work_channel.recv() {
-        let result = unpack_record(record, version, variant, in_file, outdir, encryption_key.clone())
-            .map_err(|error| error
-                .with_path_if_none(record.filename()));
+        let result = unpack_record(
+            record,
+            version,
+            variant,
+            in_file,
+            outdir,
+            encryption_key.clone(),
+        )
+        .map_err(|error| error.with_path_if_none(record.filename()));
 
         result_channel.send(result)?;
     }
@@ -268,7 +332,12 @@ fn worker_proc(in_file: &mut File, version: u32, variant: Variant, encryption_ke
     Ok(())
 }
 
-fn decrypt_entry(buffer: &mut Vec<u8>, record: &Record, encryption_key: Option<Vec<u8>>, size: usize) -> Result<()> {
+fn decrypt_entry(
+    buffer: &mut Vec<u8>,
+    record: &Record,
+    encryption_key: Option<Vec<u8>>,
+    size: usize,
+) -> Result<()> {
     if record.encrypted() {
         if let Some(key) = encryption_key {
             decrypt(buffer, &key);
@@ -277,7 +346,8 @@ fn decrypt_entry(buffer: &mut Vec<u8>, record: &Record, encryption_key: Option<V
         } else {
             return Err(Error::new(
                 "File is encrypted, but no encryption key was provided".to_string(),
-            ).with_path(record.filename()));
+            )
+            .with_path(record.filename()));
         }
     }
     Ok(())
