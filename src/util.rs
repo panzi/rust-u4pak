@@ -7,7 +7,6 @@
 use std::io::Read;
 use std::str::FromStr;
 use core::num::NonZeroU32;
-use openssl::sha::Sha1 as OpenSSLSha1;
 
 use crate::{Result, Error};
 
@@ -219,7 +218,7 @@ pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
 }
 
 pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
-    let mut hasher = OpenSSLSha1::new();
+    let mut hasher = sha1_smol::Sha1::new();
     let mut buffer = [0; 1024];
 
     loop {
@@ -230,5 +229,5 @@ pub fn sha1_digest<R: Read>(mut reader: R) -> Result<[u8; 20]> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(hasher.finish())
+    Ok(hasher.digest().bytes())
 }

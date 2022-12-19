@@ -23,5 +23,7 @@ pub mod check;
 pub mod reopen;
 pub mod walkdir;
 
+const BLOCK_SIZE: usize = 16;
+
 #[cfg(target_os = "linux")]
 pub mod mount;

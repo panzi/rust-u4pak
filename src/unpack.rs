@@ -10,7 +10,7 @@ use std::fs::File;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossbeam_utils::thread;
 use flate2::bufread::ZlibDecoder;
-use aes::BLOCK_SIZE;
+use super::BLOCK_SIZE;
 
 use crate::util::align;
 use crate::decrypt::decrypt;

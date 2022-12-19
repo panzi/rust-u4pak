@@ -4,8 +4,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use aes::cipher::{BlockDecrypt, NewBlockCipher};
-use aes::{Aes256, Block, BLOCK_SIZE};
+use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::{Aes256, Block};
+use super::BLOCK_SIZE;
 use log::trace;
 
 pub fn decrypt(data: &mut Vec<u8>, key: &Vec<u8>) {

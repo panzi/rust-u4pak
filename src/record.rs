@@ -6,9 +6,9 @@
 
 use std::io::{Read, Write};
 use std::fmt::Write as FmtWrite;
-use aes::BLOCK_SIZE;
+use super::BLOCK_SIZE;
 
-use crate::{Error, Result, check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
+use crate::{Result, check::NULL_SHA1, pak::{COMPR_NONE, HexDisplay, Sha1}};
 use crate::decode;
 use crate::decode::Decode;
 use crate::encode;
