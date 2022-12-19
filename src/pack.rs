@@ -100,20 +100,20 @@ impl TryFrom<&str> for PackPath {
                     }
                 }
 
-                return Ok(Self {
+                Ok(Self {
                     compression_block_size,
                     compression_level,
                     compression_method,
                     filename: filename.to_string(),
                     rename,
-                });
+                })
             } else {
-                return Err(Error::new(format!(
+                Err(Error::new(format!(
                     "illegal path specification, expected a second ':' in: {:?}",
-                    path_spec)));
+                    path_spec)))
             }
         } else {
-            return Ok(Self::new(path_spec.to_string()));
+            Ok(Self::new(path_spec.to_string()))
         }
     }
 }
@@ -243,7 +243,7 @@ pub fn pack(pak_path: impl AsRef<Path>, paths: &[PackPath], options: PackOptions
             let source_path: PathBuf;
             let filename = if let Some(filename) = &path.rename {
                 source_path = (&path.filename).into();
-                parse_pak_path(&filename).collect::<Vec<_>>()
+                parse_pak_path(filename).collect::<Vec<_>>()
             } else {
                 #[cfg(target_os = "windows")]
                 let filename = path.filename
@@ -649,7 +649,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                         out_buffer.clear();
                         let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                        zlib.write_all(&buffer)?;
+                        zlib.write_all(buffer)?;
                         zlib.finish()?;
                     }
 
@@ -704,7 +704,7 @@ fn worker_proc(options: &PackOptions, work_channel: Receiver<Work>, result_chann
 
                             out_buffer.clear();
                             let mut zlib = ZlibEncoder::new(&mut out_buffer, compression_level);
-                            zlib.write_all(&buffer)?;
+                            zlib.write_all(buffer)?;
                             zlib.finish()?;
                             data.write_all(&out_buffer)?;
                             hasher.update(&out_buffer);

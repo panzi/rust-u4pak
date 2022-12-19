@@ -11,7 +11,7 @@ use log::trace;
 
 pub fn decrypt(data: &mut Vec<u8>, key: &Vec<u8>) {
     trace!("Decrypting data using aes256 with key {:?}", key);
-    let cipher = Aes256::new_from_slice(&key).expect("Unable to convert key to Aes256 cipher");
+    let cipher = Aes256::new_from_slice(key).expect("Unable to convert key to Aes256 cipher");
     assert_eq!(data.len() % BLOCK_SIZE, 0, "Data length must be a multiple of 16");
 
     for block in data.chunks_mut(BLOCK_SIZE) {

@@ -80,12 +80,12 @@ where R: Read, R: Seek {
     loop {
         if remaining >= BUFFER_SIZE as u64 {
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             remaining -= BUFFER_SIZE as u64;
         } else {
             let buffer = &mut buffer[..remaining as usize];
             reader.read_exact(buffer)?;
-            hasher.update(&buffer);
+            hasher.update(buffer);
             break;
         }
     }
@@ -362,7 +362,7 @@ pub fn check<'a>(pak: &'a Pak, in_file: &mut File, options: CheckOptions) -> Res
 
     match thread_result {
         Err(error) => {
-            return Err(Error::new(format!("threading error: {:?}", error)));
+            Err(Error::new(format!("threading error: {:?}", error)))
         }
         Ok(result) => result
     }

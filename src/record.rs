@@ -24,7 +24,7 @@ macro_rules! cmp_record_field {
     };
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Record {
     filename: String,
     offset: u64,
@@ -492,6 +492,6 @@ impl Record {
 
 impl AsRef<Record> for Record {
     fn as_ref(&self) -> &Record {
-        &self
+        self
     }
 }

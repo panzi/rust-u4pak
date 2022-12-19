@@ -14,7 +14,7 @@ use std::convert::TryFrom;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use log::{debug, error, trace, warn};
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Encoding {
     ASCII,
     Latin1,
@@ -113,7 +113,7 @@ impl Index {
         let mut index_buff = vec![0; index_size as usize];
         reader.read_exact(&mut index_buff)?;
         if let Some(encryption_key) = &encryption_key {
-            decrypt(&mut index_buff, &encryption_key);
+            decrypt(&mut index_buff, encryption_key);
         }
 
         let decrypted_index = &mut Cursor::new(index_buff);
@@ -123,19 +123,17 @@ impl Index {
         if version < 10 {
             records = read_records_legacy(decrypted_index, version, variant, encoding)
                 .expect("Failed to read index records");
-        } else {
-            if let Ok((index_info, mut r)) = read_records(decrypted_index, encoding) {
-                if let Ok(mut sec_records) = read_secondary_index_records(reader, &index_info, encryption_key, encoding) {
-                    r.append(&mut sec_records);
-                }
-
-                records = r;
-            } else {
-                return Err(Error::new(format!(
-                    "Only know how to handle Conan Exile paks of version 4, but version was {}.",
-                    version
-                )));
+        } else if let Ok((index_info, mut r)) = read_records(decrypted_index, encoding) {
+            if let Ok(mut sec_records) = read_secondary_index_records(reader, &index_info, encryption_key, encoding) {
+                r.append(&mut sec_records);
             }
+
+            records = r;
+        } else {
+            return Err(Error::new(format!(
+                "Only know how to handle Conan Exile paks of version 4, but version was {}.",
+                version
+            )));
         };
 
         Ok(Self {
@@ -158,7 +156,7 @@ impl Index {
     }
 
     #[inline]
-    pub fn into_records<'a>(self) -> Vec<Record> {
+    pub fn into_records(self) -> Vec<Record> {
         self.records
     }
 }
@@ -247,8 +245,10 @@ pub fn read_records(
         has_path_hash_index: u32
     );
 
-    let mut secondary_index_info = SecondaryIndexInfo::default();
-    secondary_index_info.has_path_hash_index = has_path_hash_index != 0;
+    let mut secondary_index_info = SecondaryIndexInfo {
+        has_path_hash_index: has_path_hash_index != 0,
+        ..Default::default()
+    };
 
     if secondary_index_info.has_path_hash_index {
         decode!(

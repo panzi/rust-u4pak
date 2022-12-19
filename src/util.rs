@@ -137,28 +137,28 @@ pub fn parse_size(value: &str) -> std::result::Result<usize, <usize as FromStr>:
     }
 
     if value.ends_with('K') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024)
     } else if value.ends_with('M') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024)
     } else if value.ends_with('G') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024)
     } else if value.ends_with('T') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('P') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('E') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Z') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else if value.ends_with('Y') {
-        value = &value[..value.len() - 1].trim_end();
+        value = value[..value.len() - 1].trim_end();
         Ok(value.parse::<usize>()? * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024 * 1024)
     } else {
         value.parse()
@@ -209,9 +209,9 @@ pub fn parse_compression_level(value: &str) -> Result<NonZeroU32> {
                 Ok(NonZeroU32::new(level).unwrap())
             }
             _ => {
-                return Err(Error::new(format!(
+                Err(Error::new(format!(
                     "illegal compression level: {:?}",
-                    value)));
+                    value)))
             }
         }
     }

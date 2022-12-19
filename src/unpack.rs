@@ -137,7 +137,7 @@ fn unpack_iter<'a>(pak: &Pak, in_file: &mut File, outdir: &Path, options: &'a Un
 
     match thread_result {
         Err(error) => {
-            return Err(Error::new(format!("threading error: {:?}", error)));
+            Err(Error::new(format!("threading error: {:?}", error)))
         }
         Ok(result) => result
     }
